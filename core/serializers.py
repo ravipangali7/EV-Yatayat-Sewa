@@ -25,6 +25,89 @@ class LoginSerializer(serializers.Serializer):
         return attrs
 
 
+class RegisterSerializer(serializers.Serializer):
+    """Serializer for user registration"""
+    phone = serializers.CharField(required=True, max_length=100)
+    name = serializers.CharField(required=True, max_length=100)
+    email = serializers.EmailField(required=False, allow_blank=True, allow_null=True)
+    password = serializers.CharField(required=True, write_only=True, min_length=6, style={'input_type': 'password'})
+    
+    def validate_phone(self, value):
+        """Validate phone number"""
+        if User.objects.filter(phone=value).exists():
+            raise serializers.ValidationError('User with this phone number already exists.')
+        return value
+
+
+class ForgotPasswordSerializer(serializers.Serializer):
+    """Serializer for forgot password request"""
+    phone = serializers.CharField(required=True, max_length=100)
+    
+    def validate_phone(self, value):
+        """Validate phone number exists"""
+        if not User.objects.filter(phone=value).exists():
+            raise serializers.ValidationError('User with this phone number does not exist.')
+        return value
+
+
+class VerifyOTPSerializer(serializers.Serializer):
+    """Serializer for OTP verification"""
+    phone = serializers.CharField(required=True, max_length=100)
+    otp_code = serializers.CharField(required=True, max_length=6, min_length=6)
+    
+    def validate(self, attrs):
+        """Validate OTP code"""
+        from .models import OTPVerification
+        phone = attrs.get('phone')
+        otp_code = attrs.get('otp_code')
+        
+        try:
+            otp_obj = OTPVerification.objects.filter(
+                phone=phone,
+                otp_code=otp_code,
+                is_used=False
+            ).order_by('-created_at').first()
+            
+            if not otp_obj:
+                raise serializers.ValidationError('Invalid OTP code.')
+            
+            if otp_obj.is_expired():
+                raise serializers.ValidationError('OTP code has expired.')
+            
+            attrs['otp_obj'] = otp_obj
+        except Exception as e:
+            raise serializers.ValidationError('Invalid OTP code.')
+        
+        return attrs
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    """Serializer for changing password with reset token"""
+    reset_token = serializers.CharField(required=True)
+    new_password = serializers.CharField(required=True, write_only=True, min_length=6, style={'input_type': 'password'})
+    
+    def validate_reset_token(self, value):
+        """Validate reset token"""
+        from .models import OTPVerification
+        try:
+            otp_obj = OTPVerification.objects.filter(
+                reset_token=value,
+                is_used=False
+            ).order_by('-created_at').first()
+            
+            if not otp_obj:
+                raise serializers.ValidationError('Invalid reset token.')
+            
+            if otp_obj.is_expired():
+                raise serializers.ValidationError('Reset token has expired.')
+            
+            return value
+        except serializers.ValidationError:
+            raise
+        except Exception:
+            raise serializers.ValidationError('Invalid reset token.')
+
+
 class UserSerializer(serializers.ModelSerializer):
     """Serializer for User model"""
     class Meta:

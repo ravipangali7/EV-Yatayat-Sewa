@@ -2,7 +2,8 @@ from django.urls import path
 from .views import (
     place_views,
     route_views,
-    vehicle_views
+    vehicle_views,
+    seat_booking_views
 )
 
 urlpatterns = [
@@ -30,6 +31,8 @@ urlpatterns = [
     # Vehicle endpoints
     path('vehicles/', vehicle_views.vehicle_list_get_view, name='vehicle-list-get'),
     path('vehicles/create/', vehicle_views.vehicle_list_post_view, name='vehicle-list-post'),
+    path('vehicles/connect/', vehicle_views.vehicle_connect_view, name='vehicle-connect'),
+    path('vehicles/my-active-vehicle/', vehicle_views.vehicle_my_active_get_view, name='vehicle-my-active'),
     path('vehicles/<int:pk>/', vehicle_views.vehicle_detail_get_view, name='vehicle-detail-get'),
     path('vehicles/<int:pk>/edit/', vehicle_views.vehicle_detail_post_view, name='vehicle-detail-post'),
     path('vehicles/<int:pk>/delete/', vehicle_views.vehicle_delete_get_view, name='vehicle-delete'),
@@ -47,4 +50,16 @@ urlpatterns = [
     path('vehicles/<int:vehicle_id>/images/<int:pk>/', vehicle_views.vehicle_image_detail_get_view, name='vehicle-image-detail-get'),
     path('vehicles/<int:vehicle_id>/images/<int:pk>/edit/', vehicle_views.vehicle_image_detail_post_view, name='vehicle-image-detail-post'),
     path('vehicles/<int:vehicle_id>/images/<int:pk>/delete/', vehicle_views.vehicle_image_delete_get_view, name='vehicle-image-delete'),
+    
+    # Seat Booking endpoints
+    path('seat-bookings/', seat_booking_views.seat_booking_list_get_view, name='seat-booking-list-get'),
+    path('seat-bookings/create/', seat_booking_views.seat_booking_list_post_view, name='seat-booking-list-post'),
+    path('seat-bookings/<int:pk>/', seat_booking_views.seat_booking_detail_get_view, name='seat-booking-detail-get'),
+    path('seat-bookings/<int:pk>/edit/', seat_booking_views.seat_booking_detail_post_view, name='seat-booking-detail-post'),
+    path('seat-bookings/<int:pk>/delete/', seat_booking_views.seat_booking_delete_get_view, name='seat-booking-delete'),
+    
+    # Seat Booking special endpoints
+    path('seat-bookings/book/', seat_booking_views.seat_booking_create_view, name='seat-booking-create'),
+    path('seat-bookings/switch/', seat_booking_views.seat_booking_switch_view, name='seat-booking-switch'),
+    path('seat-bookings/checkout/', seat_booking_views.seat_booking_checkout_view, name='seat-booking-checkout'),
 ]

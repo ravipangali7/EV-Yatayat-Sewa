@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Place, Route, RouteStopPoint, Vehicle, VehicleSeat, VehicleImage
+from .models import Place, Route, RouteStopPoint, Vehicle, VehicleSeat, VehicleImage, SeatBooking
 
 
 @admin.register(Place)
@@ -94,3 +94,15 @@ class VehicleImageAdmin(admin.ModelAdmin):
     raw_id_fields = ('vehicle',)
     readonly_fields = ('created_at', 'updated_at')
     date_hierarchy = 'created_at'
+
+
+@admin.register(SeatBooking)
+class SeatBookingAdmin(admin.ModelAdmin):
+    """SeatBooking admin"""
+    list_display = ('id', 'vehicle', 'vehicle_seat', 'user', 'is_guest', 'check_in_datetime', 'check_out_datetime', 'trip_amount', 'is_paid', 'created_at', 'updated_at')
+    list_filter = ('is_guest', 'is_paid', 'vehicle', 'created_at', 'updated_at', 'check_in_datetime')
+    search_fields = ('vehicle__name', 'vehicle__vehicle_no', 'user__name', 'user__phone', 'vehicle_seat__side', 'vehicle_seat__number')
+    list_editable = ('is_paid',)
+    raw_id_fields = ('user', 'vehicle', 'vehicle_seat')
+    readonly_fields = ('created_at', 'updated_at')
+    date_hierarchy = 'check_in_datetime'

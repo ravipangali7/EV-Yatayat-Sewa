@@ -189,9 +189,10 @@ def user_detail_post_view(request, pk):
         is_active = request.POST.get('is_active') or request.data.get('is_active')
         user.is_active = is_active.lower() == 'true' if isinstance(is_active, str) else bool(is_active)
     
-    # Handle file uploads
+    # Handle file uploads - save immediately to ensure database field is updated
     if 'profile_picture' in request.FILES:
         user.profile_picture = request.FILES['profile_picture']
+        user.save(update_fields=['profile_picture'])  # Save immediately to database
     
     user.save()
     

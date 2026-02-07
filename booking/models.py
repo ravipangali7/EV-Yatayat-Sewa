@@ -145,3 +145,41 @@ class VehicleImage(models.Model):
     
     def __str__(self):
         return f"{self.vehicle.name} - {self.title or 'Image'}"
+
+
+class SeatBooking(models.Model):
+    """Seat booking model"""
+    id = models.BigAutoField(primary_key=True)
+    user = models.ForeignKey('core.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='seat_bookings')
+    is_guest = models.BooleanField(default=False)
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, related_name='seat_bookings')
+    vehicle_seat = models.ForeignKey(VehicleSeat, on_delete=models.CASCADE, related_name='bookings')
+    check_in_lat = models.DecimalField(max_digits=20, decimal_places=16)
+    check_in_lng = models.DecimalField(max_digits=20, decimal_places=16)
+    check_in_datetime = models.DateTimeField()
+    check_in_address = models.TextField()
+    check_out_lat = models.DecimalField(max_digits=20, decimal_places=16, null=True, blank=True)
+    check_out_lng = models.DecimalField(max_digits=20, decimal_places=16, null=True, blank=True)
+    check_out_datetime = models.DateTimeField(null=True, blank=True)
+    check_out_address = models.TextField(blank=True, null=True)
+    trip_distance = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)  # in kilometers
+    trip_duration = models.IntegerField(null=True, blank=True)  # in seconds
+    trip_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    is_paid = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
+    updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
+    
+    class Meta:
+        db_table = 'seat_bookings'
+        indexes = [
+            models.Index(fields=['vehicle', 'vehicle_seat']),
+            models.Index(fields=['user']),
+            models.Index(fields=['is_guest']),
+            models.Index(fields=['is_paid']),
+            models.Index(fields=['check_in_datetime']),
+            models.Index(fields=['vehicle_seat', 'check_out_datetime']),  # For finding active bookings
+        ]
+    
+    def __str__(self):
+        user_info = f"{self.user.name if self.user else 'Guest'}"
+        return f"{self.vehicle.name} - {self.vehicle_seat.side}{self.vehicle_seat.number} - {user_info}"

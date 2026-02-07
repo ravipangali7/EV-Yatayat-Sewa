@@ -12,6 +12,10 @@ urlpatterns = [
     path('auth/login/', auth_views.login_view, name='auth-login'),
     path('auth/logout/', auth_views.logout_view, name='auth-logout'),
     path('auth/me/', auth_views.me_view, name='auth-me'),
+    path('auth/register/', auth_views.register_view, name='auth-register'),
+    path('auth/forgot-password/', auth_views.forgot_password_view, name='auth-forgot-password'),
+    path('auth/verify-otp/', auth_views.verify_otp_view, name='auth-verify-otp'),
+    path('auth/change-password/', auth_views.change_password_view, name='auth-change-password'),
     
     # User endpoints
     path('users/', user_views.user_list_get_view, name='user-list-get'),

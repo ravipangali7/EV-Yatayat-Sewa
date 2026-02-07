@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Place, Route, RouteStopPoint, Vehicle, VehicleSeat, VehicleImage
+from .models import Place, Route, RouteStopPoint, Vehicle, VehicleSeat, VehicleImage, SeatBooking
 
 
 class PlaceSerializer(serializers.ModelSerializer):
@@ -101,3 +101,32 @@ class VehicleSerializer(serializers.ModelSerializer):
             'is_active', 'seats', 'images', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'seats', 'images']
+
+
+class SeatBookingSerializer(serializers.ModelSerializer):
+    """Serializer for SeatBooking model"""
+    from core.serializers import UserListSerializer
+    
+    user_details = UserListSerializer(source='user', read_only=True)
+    vehicle_details = serializers.SerializerMethodField()
+    vehicle_seat_details = VehicleSeatSerializer(source='vehicle_seat', read_only=True)
+    
+    class Meta:
+        model = SeatBooking
+        fields = [
+            'id', 'user', 'user_details', 'is_guest', 'vehicle', 'vehicle_details',
+            'vehicle_seat', 'vehicle_seat_details', 'check_in_lat', 'check_in_lng',
+            'check_in_datetime', 'check_in_address', 'check_out_lat', 'check_out_lng',
+            'check_out_datetime', 'check_out_address', 'trip_distance', 'trip_duration',
+            'trip_amount', 'is_paid', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+    
+    def get_vehicle_details(self, obj):
+        """Get lightweight vehicle details"""
+        return {
+            'id': str(obj.vehicle.id),
+            'name': obj.vehicle.name,
+            'vehicle_no': obj.vehicle.vehicle_no,
+            'vehicle_type': obj.vehicle.vehicle_type,
+        }

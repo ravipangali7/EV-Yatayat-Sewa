@@ -1,5 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
+from django.utils import timezone
+from datetime import timedelta
 
 
 class User(AbstractUser):
@@ -118,3 +120,49 @@ class Transaction(models.Model):
     
     def __str__(self):
         return f"Transaction {self.id} - {self.type} {self.amount} ({self.status})"
+
+
+class OTPVerification(models.Model):
+    """OTP Verification model for password reset and phone verification"""
+    id = models.BigAutoField(primary_key=True)
+    phone = models.CharField(max_length=100, db_index=True)
+    otp_code = models.CharField(max_length=6)
+    expires_at = models.DateTimeField(db_index=True)
+    is_used = models.BooleanField(default=False)
+    reset_token = models.CharField(max_length=255, null=True, blank=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
+    
+    class Meta:
+        db_table = 'otp_verifications'
+        indexes = [
+            models.Index(fields=['phone', 'is_used']),
+            models.Index(fields=['reset_token']),
+        ]
+    
+    def __str__(self):
+        return f"OTP for {self.phone} - {'Used' if self.is_used else 'Active'}"
+    
+    def is_expired(self):
+        """Check if OTP has expired"""
+        return timezone.now() > self.expires_at
+    
+    def is_valid(self):
+        """Check if OTP is valid (not used and not expired)"""
+        return not self.is_used and not self.is_expired()
+    
+    @classmethod
+    def create_otp(cls, phone: str, reset_token: str = None):
+        """Create a new OTP for a phone number"""
+        import random
+        otp_code = str(random.randint(100000, 999999))  # 6-digit OTP
+        expires_at = timezone.now() + timedelta(minutes=10)  # 10 minutes expiration
+        
+        # Invalidate any existing unused OTPs for this phone
+        cls.objects.filter(phone=phone, is_used=False).update(is_used=True)
+        
+        return cls.objects.create(
+            phone=phone,
+            otp_code=otp_code,
+            expires_at=expires_at,
+            reset_token=reset_token
+        )
