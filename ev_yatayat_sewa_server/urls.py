@@ -25,8 +25,11 @@ urlpatterns = [
     re_path(r'^media/(?P<path>.*)$', serve_media, name='media'),
     path('api/', include('core.urls')),
     path('api/', include('booking.urls')),
-    path('', admin.site.urls),
 ]
 
 urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
 urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
+urlpatterns += [
+    path('', admin.site.urls),
+]
