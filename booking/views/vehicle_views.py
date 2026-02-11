@@ -1293,14 +1293,21 @@ def vehicle_connect_view(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def vehicle_my_active_get_view(request):
-    """Get the vehicle where the authenticated user is the active_driver"""
+    """Get the vehicle where the authenticated user is the active_driver.
+    If the user is active on multiple vehicles, returns the most recently updated one.
+    """
     user = request.user
-    
-    try:
-        vehicle = Vehicle.objects.prefetch_related(
+
+    vehicle = (
+        Vehicle.objects.prefetch_related(
             'drivers', 'routes', 'seats', 'images'
-        ).select_related('active_driver', 'active_route').get(active_driver=user)
-    except Vehicle.DoesNotExist:
+        )
+        .select_related('active_driver', 'active_route')
+        .filter(active_driver=user)
+        .order_by('-updated_at')
+        .first()
+    )
+    if not vehicle:
         return Response({'vehicle': None}, status=status.HTTP_200_OK)
     
     # Build response data (same format as vehicle_detail_get_view)
