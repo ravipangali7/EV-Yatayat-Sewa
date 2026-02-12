@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Place, Route, RouteStopPoint, Vehicle, VehicleSeat, VehicleImage, SeatBooking
+from .models import Place, Route, RouteStopPoint, Vehicle, VehicleSeat, VehicleImage, VehicleSchedule, Trip, Location, VehicleTicketBooking, SeatBooking
 
 
 @admin.register(Place)
@@ -96,13 +96,57 @@ class VehicleImageAdmin(admin.ModelAdmin):
     date_hierarchy = 'created_at'
 
 
+@admin.register(VehicleSchedule)
+class VehicleScheduleAdmin(admin.ModelAdmin):
+    """VehicleSchedule admin"""
+    list_display = ('id', 'vehicle', 'route', 'date', 'time', 'price', 'created_at', 'updated_at')
+    list_filter = ('date', 'vehicle', 'route', 'created_at', 'updated_at')
+    search_fields = ('vehicle__name', 'vehicle__vehicle_no', 'route__name')
+    raw_id_fields = ('vehicle', 'route')
+    readonly_fields = ('created_at', 'updated_at')
+    date_hierarchy = 'date'
+
+
+@admin.register(Trip)
+class TripAdmin(admin.ModelAdmin):
+    """Trip admin"""
+    list_display = ('id', 'trip_id', 'vehicle', 'driver', 'route', 'start_time', 'end_time', 'is_scheduled', 'created_at', 'updated_at')
+    list_filter = ('is_scheduled', 'vehicle', 'created_at', 'updated_at')
+    search_fields = ('trip_id', 'vehicle__name', 'vehicle__vehicle_no', 'driver__name', 'driver__phone', 'route__name')
+    raw_id_fields = ('vehicle', 'driver', 'route', 'vehicle_schedule')
+    readonly_fields = ('created_at', 'updated_at')
+    date_hierarchy = 'created_at'
+
+
+@admin.register(Location)
+class LocationAdmin(admin.ModelAdmin):
+    """Location admin"""
+    list_display = ('id', 'vehicle', 'trip', 'latitude', 'longitude', 'speed', 'created_at', 'updated_at')
+    list_filter = ('vehicle', 'created_at', 'updated_at')
+    search_fields = ('vehicle__name', 'vehicle__vehicle_no')
+    raw_id_fields = ('vehicle', 'trip')
+    readonly_fields = ('created_at', 'updated_at')
+    date_hierarchy = 'created_at'
+
+
+@admin.register(VehicleTicketBooking)
+class VehicleTicketBookingAdmin(admin.ModelAdmin):
+    """VehicleTicketBooking admin"""
+    list_display = ('id', 'pnr', 'ticket_id', 'vehicle_schedule', 'user', 'name', 'phone', 'price', 'is_paid', 'created_at', 'updated_at')
+    list_filter = ('is_guest', 'is_paid', 'created_at', 'updated_at')
+    search_fields = ('pnr', 'ticket_id', 'name', 'phone', 'vehicle_schedule__vehicle__name')
+    raw_id_fields = ('user', 'vehicle_schedule')
+    readonly_fields = ('created_at', 'updated_at')
+    date_hierarchy = 'created_at'
+
+
 @admin.register(SeatBooking)
 class SeatBookingAdmin(admin.ModelAdmin):
     """SeatBooking admin"""
-    list_display = ('id', 'vehicle', 'vehicle_seat', 'user', 'is_guest', 'check_in_datetime', 'check_out_datetime', 'trip_amount', 'is_paid', 'created_at', 'updated_at')
+    list_display = ('id', 'vehicle', 'vehicle_seat', 'trip', 'user', 'is_guest', 'check_in_datetime', 'check_out_datetime', 'trip_amount', 'is_paid', 'created_at', 'updated_at')
     list_filter = ('is_guest', 'is_paid', 'vehicle', 'created_at', 'updated_at', 'check_in_datetime')
     search_fields = ('vehicle__name', 'vehicle__vehicle_no', 'user__name', 'user__phone', 'vehicle_seat__side', 'vehicle_seat__number')
     list_editable = ('is_paid',)
-    raw_id_fields = ('user', 'vehicle', 'vehicle_seat')
+    raw_id_fields = ('user', 'vehicle', 'vehicle_seat', 'trip')
     readonly_fields = ('created_at', 'updated_at')
     date_hierarchy = 'check_in_datetime'

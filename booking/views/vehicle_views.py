@@ -5,8 +5,21 @@ from rest_framework.permissions import IsAuthenticated
 from django.db.models import Q
 from decimal import Decimal
 import json
-from ..models import Vehicle, VehicleSeat, VehicleImage, Route
+from ..models import Vehicle, VehicleSeat, VehicleImage, Route, Trip
 from core.models import User
+
+
+def _get_active_trip_for_vehicle(vehicle):
+    """Return active_trip dict for vehicle (trip with end_time=None) or None."""
+    trip = Trip.objects.filter(vehicle=vehicle, end_time__isnull=True).order_by('-start_time').first()
+    if not trip:
+        return None
+    return {
+        'id': str(trip.id),
+        'trip_id': trip.trip_id,
+        'start_time': trip.start_time.isoformat() if trip.start_time else None,
+        'end_time': None,
+    }
 
 
 @api_view(['GET'])
@@ -172,6 +185,7 @@ def vehicle_list_get_view(request):
             'route_details': route_details,
             'active_route': str(vehicle.active_route.id) if vehicle.active_route else None,
             'active_route_details': active_route_details,
+            'active_trip': _get_active_trip_for_vehicle(vehicle),
             'is_active': vehicle.is_active,
             'seats': seats,
             'images': images,
@@ -429,6 +443,7 @@ def vehicle_list_post_view(request):
         'route_details': route_details,
         'active_route': str(vehicle.active_route.id) if vehicle.active_route else None,
         'active_route_details': active_route_details,
+        'active_trip': _get_active_trip_for_vehicle(vehicle),
         'is_active': vehicle.is_active,
         'seats': seats,
         'images': images,
@@ -558,6 +573,7 @@ def vehicle_detail_get_view(request, pk):
         'route_details': route_details,
         'active_route': str(vehicle.active_route.id) if vehicle.active_route else None,
         'active_route_details': active_route_details,
+        'active_trip': _get_active_trip_for_vehicle(vehicle),
         'is_active': vehicle.is_active,
         'seats': seats,
         'images': images,
@@ -837,6 +853,7 @@ def vehicle_detail_post_view(request, pk):
         'route_details': route_details,
         'active_route': str(vehicle.active_route.id) if vehicle.active_route else None,
         'active_route_details': active_route_details,
+        'active_trip': _get_active_trip_for_vehicle(vehicle),
         'is_active': vehicle.is_active,
         'seats': seats,
         'images': images,
@@ -1282,6 +1299,7 @@ def vehicle_connect_view(request):
         'route_details': route_details,
         'active_route': str(vehicle.active_route.id) if vehicle.active_route else None,
         'active_route_details': active_route_details,
+        'active_trip': _get_active_trip_for_vehicle(vehicle),
         'is_active': vehicle.is_active,
         'seats': seats,
         'images': images,
@@ -1422,6 +1440,7 @@ def vehicle_my_active_get_view(request):
             'route_details': route_details,
             'active_route': str(vehicle.active_route.id) if vehicle.active_route else None,
             'active_route_details': active_route_details,
+            'active_trip': _get_active_trip_for_vehicle(vehicle),
             'is_active': vehicle.is_active,
             'seats': seats,
             'images': images,

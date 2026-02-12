@@ -1,0 +1,81 @@
+"""Location views: create and list."""
+from decimal import Decimal
+
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework import status
+
+from ..models import Location, Vehicle, Trip
+
+
+def _location_to_response(loc):
+    return {
+        'id': str(loc.id),
+        'vehicle': str(loc.vehicle.id),
+        'trip': str(loc.trip.id) if loc.trip else None,
+        'latitude': str(loc.latitude),
+        'longitude': str(loc.longitude),
+        'speed': str(loc.speed) if loc.speed is not None else None,
+        'created_at': loc.created_at.isoformat(),
+        'updated_at': loc.updated_at.isoformat(),
+    }
+
+
+@api_view(['POST'])
+def location_list_post_view(request):
+    """Create a location record."""
+    vehicle_id = request.POST.get('vehicle') or request.data.get('vehicle')
+    trip_id = request.POST.get('trip') or request.data.get('trip')
+    latitude = request.POST.get('latitude') or request.data.get('latitude')
+    longitude = request.POST.get('longitude') or request.data.get('longitude')
+    speed = request.POST.get('speed') or request.data.get('speed')
+
+    if not vehicle_id or not latitude or not longitude:
+        return Response({'error': 'vehicle, latitude and longitude are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        vehicle = Vehicle.objects.get(pk=vehicle_id)
+    except Vehicle.DoesNotExist:
+        return Response({'error': 'Vehicle not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    trip = None
+    if trip_id:
+        try:
+            trip = Trip.objects.get(pk=trip_id, vehicle=vehicle)
+        except Trip.DoesNotExist:
+            pass
+
+    loc = Location.objects.create(
+        vehicle=vehicle,
+        trip=trip,
+        latitude=Decimal(str(latitude)),
+        longitude=Decimal(str(longitude)),
+        speed=Decimal(str(speed)) if speed is not None else None,
+    )
+    return Response(_location_to_response(loc), status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET'])
+def location_list_get_view(request):
+    """List locations, optionally filter by vehicle and/or trip."""
+    vehicle_id = request.query_params.get('vehicle')
+    trip_id = request.query_params.get('trip')
+    queryset = Location.objects.select_related('vehicle', 'trip').all()
+    if vehicle_id:
+        queryset = queryset.filter(vehicle_id=vehicle_id)
+    if trip_id:
+        queryset = queryset.filter(trip_id=trip_id)
+
+    page = int(request.query_params.get('page', 1))
+    per_page = int(request.query_params.get('per_page', 50))
+    start = (page - 1) * per_page
+    end = start + per_page
+    total = queryset.count()
+    locations = queryset.order_by('-created_at')[start:end]
+
+    return Response({
+        'results': [_location_to_response(l) for l in locations],
+        'count': total,
+        'page': page,
+        'per_page': per_page,
+    })

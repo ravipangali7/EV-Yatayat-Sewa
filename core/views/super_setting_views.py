@@ -29,6 +29,7 @@ def super_setting_list_get_view(request):
         results.append({
             'id': str(setting.id),
             'per_km_charge': str(setting.per_km_charge),
+            'gps_threshold': str(setting.gps_threshold),
             'created_at': setting.created_at.isoformat(),
             'updated_at': setting.updated_at.isoformat(),
         })
@@ -57,15 +58,24 @@ def super_setting_list_post_view(request):
     except (ValueError, TypeError):
         return Response({'error': 'Invalid per_km_charge value'}, status=status.HTTP_400_BAD_REQUEST)
     
+    # Optional gps_threshold (default 5)
+    gps_threshold = request.POST.get('gps_threshold') or request.data.get('gps_threshold', '5')
+    try:
+        gps_threshold = Decimal(str(gps_threshold))
+    except (ValueError, TypeError):
+        gps_threshold = Decimal('5')
+    
     # Create setting directly without serializer
     setting = SuperSetting.objects.create(
         per_km_charge=per_km_charge,
+        gps_threshold=gps_threshold,
     )
     
     # Return response
     return Response({
         'id': str(setting.id),
         'per_km_charge': str(setting.per_km_charge),
+        'gps_threshold': str(setting.gps_threshold),
         'created_at': setting.created_at.isoformat(),
         'updated_at': setting.updated_at.isoformat(),
     }, status=status.HTTP_201_CREATED)
@@ -83,6 +93,7 @@ def super_setting_detail_get_view(request, pk):
     return Response({
         'id': str(setting.id),
         'per_km_charge': str(setting.per_km_charge),
+        'gps_threshold': str(setting.gps_threshold),
         'created_at': setting.created_at.isoformat(),
         'updated_at': setting.updated_at.isoformat(),
     })
@@ -104,12 +115,20 @@ def super_setting_detail_post_view(request, pk):
         except (ValueError, TypeError):
             return Response({'error': 'Invalid per_km_charge value'}, status=status.HTTP_400_BAD_REQUEST)
     
+    if 'gps_threshold' in request.POST or 'gps_threshold' in request.data:
+        gps_threshold = request.POST.get('gps_threshold') or request.data.get('gps_threshold')
+        try:
+            setting.gps_threshold = Decimal(str(gps_threshold))
+        except (ValueError, TypeError):
+            return Response({'error': 'Invalid gps_threshold value'}, status=status.HTTP_400_BAD_REQUEST)
+    
     setting.save()
     
     # Return updated data
     return Response({
         'id': str(setting.id),
         'per_km_charge': str(setting.per_km_charge),
+        'gps_threshold': str(setting.gps_threshold),
         'created_at': setting.created_at.isoformat(),
         'updated_at': setting.updated_at.isoformat(),
     })

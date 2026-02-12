@@ -7,8 +7,9 @@ from decimal import Decimal
 from datetime import datetime
 import math
 import json
-from ..models import Vehicle, VehicleSeat, SeatBooking
-from core.models import User, SuperSetting
+from django.db.models import F
+from ..models import Vehicle, VehicleSeat, SeatBooking, Trip
+from core.models import User, SuperSetting, Wallet, Transaction
 from ..serializers import SeatBookingSerializer
 
 
@@ -45,7 +46,7 @@ def seat_booking_list_get_view(request):
     
     # Build queryset
     queryset = SeatBooking.objects.select_related(
-        'user', 'vehicle', 'vehicle_seat'
+        'user', 'vehicle', 'vehicle_seat', 'trip'
     ).all()
     
     if search:
@@ -156,12 +157,16 @@ def _create_seat_booking(request):
     except:
         return Response({'error': 'Invalid check_in_datetime format'}, status=status.HTTP_400_BAD_REQUEST)
     
+    # Link to active trip if vehicle has one
+    active_trip = Trip.objects.filter(vehicle=vehicle, end_time__isnull=True).order_by('-start_time').first()
+    
     # Create booking
     booking = SeatBooking.objects.create(
         user=user,
         is_guest=is_guest,
         vehicle=vehicle,
         vehicle_seat=vehicle_seat,
+        trip=active_trip,
         check_in_lat=Decimal(str(check_in_lat)),
         check_in_lng=Decimal(str(check_in_lng)),
         check_in_datetime=check_in_datetime,
@@ -187,7 +192,7 @@ def seat_booking_list_post_view(request):
 def seat_booking_detail_get_view(request, pk):
     """Retrieve a single seat booking"""
     try:
-        booking = SeatBooking.objects.select_related('user', 'vehicle', 'vehicle_seat').get(pk=pk)
+        booking = SeatBooking.objects.select_related('user', 'vehicle', 'vehicle_seat', 'trip').get(pk=pk)
     except SeatBooking.DoesNotExist:
         return Response({'error': 'Seat booking not found'}, status=status.HTTP_404_NOT_FOUND)
     
@@ -389,6 +394,24 @@ def seat_booking_checkout_view(request):
     # Update seat status to available
     vehicle_seat.status = 'available'
     vehicle_seat.save()
+    
+    # Add trip amount to passenger wallet to_pay and create transaction (driver -> user -> wallet -> to_pay)
+    if booking.user and booking.trip_amount and booking.trip_amount > 0:
+        wallet, _ = Wallet.objects.get_or_create(user=booking.user, defaults={'balance': 0, 'to_pay': 0, 'to_receive': 0})
+        balance_before = wallet.balance
+        balance_after = wallet.balance
+        Wallet.objects.filter(pk=wallet.pk).update(to_pay=F('to_pay') + booking.trip_amount)
+        wallet.refresh_from_db()
+        Transaction.objects.create(
+            wallet=wallet,
+            user=booking.user,
+            amount=booking.trip_amount,
+            balance_before=balance_before,
+            balance_after=balance_after,
+            type='add',
+            status='success',
+            remarks=f'Trip amount - Seat booking #{booking.id}',
+        )
     
     serializer = SeatBookingSerializer(booking)
     return Response(serializer.data)

@@ -61,8 +61,8 @@ def transaction_list_get_view(request):
                 'id': str(transaction.wallet.id),
                 'user': str(transaction.wallet.user.id),
                 'balance': str(transaction.wallet.balance),
-                'to_be_pay': str(transaction.wallet.to_be_pay),
-                'to_be_received': str(transaction.wallet.to_be_received),
+                'to_pay': str(transaction.wallet.to_pay),
+                'to_receive': str(transaction.wallet.to_receive),
             },
             'user': str(transaction.user.id),
             'user_details': {
@@ -169,8 +169,8 @@ def transaction_list_post_view(request):
             'id': str(transaction.wallet.id),
             'user': str(transaction.wallet.user.id),
             'balance': str(transaction.wallet.balance),
-            'to_be_pay': str(transaction.wallet.to_be_pay),
-            'to_be_received': str(transaction.wallet.to_be_received),
+            'to_pay': str(transaction.wallet.to_pay),
+            'to_receive': str(transaction.wallet.to_receive),
         },
         'user': str(transaction.user.id),
         'user_details': {
@@ -209,8 +209,8 @@ def transaction_detail_get_view(request, pk):
             'id': str(transaction.wallet.id),
             'user': str(transaction.wallet.user.id),
             'balance': str(transaction.wallet.balance),
-            'to_be_pay': str(transaction.wallet.to_be_pay),
-            'to_be_received': str(transaction.wallet.to_be_received),
+            'to_pay': str(transaction.wallet.to_pay),
+            'to_receive': str(transaction.wallet.to_receive),
         },
         'user': str(transaction.user.id),
         'user_details': {
@@ -307,8 +307,8 @@ def transaction_detail_post_view(request, pk):
             'id': str(transaction.wallet.id),
             'user': str(transaction.wallet.user.id),
             'balance': str(transaction.wallet.balance),
-            'to_be_pay': str(transaction.wallet.to_be_pay),
-            'to_be_received': str(transaction.wallet.to_be_received),
+            'to_pay': str(transaction.wallet.to_pay),
+            'to_receive': str(transaction.wallet.to_receive),
         },
         'user': str(transaction.user.id),
         'user_details': {

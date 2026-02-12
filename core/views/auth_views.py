@@ -72,7 +72,7 @@ def register_view(request):
         user.save()
         
         # Create wallet for the user
-        Wallet.objects.create(user=user, balance=0, to_be_pay=0, to_be_received=0)
+        Wallet.objects.create(user=user, balance=0, to_pay=0, to_receive=0)
         
         # Generate token
         token, created = Token.objects.get_or_create(user=user)

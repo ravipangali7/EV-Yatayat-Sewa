@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Place, Route, RouteStopPoint, Vehicle, VehicleSeat, VehicleImage, SeatBooking
+from .models import Place, Route, RouteStopPoint, Vehicle, VehicleSeat, VehicleImage, Trip, SeatBooking
 
 
 class PlaceSerializer(serializers.ModelSerializer):
@@ -103,6 +103,13 @@ class VehicleSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at', 'seats', 'images']
 
 
+class TripListSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for trip in SeatBooking"""
+    class Meta:
+        model = Trip
+        fields = ['id', 'trip_id', 'start_time', 'end_time', 'route']
+
+
 class SeatBookingSerializer(serializers.ModelSerializer):
     """Serializer for SeatBooking model"""
     from core.serializers import UserListSerializer
@@ -110,15 +117,17 @@ class SeatBookingSerializer(serializers.ModelSerializer):
     user_details = UserListSerializer(source='user', read_only=True)
     vehicle_details = serializers.SerializerMethodField()
     vehicle_seat_details = VehicleSeatSerializer(source='vehicle_seat', read_only=True)
+    trip_details = TripListSerializer(source='trip', read_only=True)
     
     class Meta:
         model = SeatBooking
         fields = [
             'id', 'user', 'user_details', 'is_guest', 'vehicle', 'vehicle_details',
-            'vehicle_seat', 'vehicle_seat_details', 'check_in_lat', 'check_in_lng',
-            'check_in_datetime', 'check_in_address', 'check_out_lat', 'check_out_lng',
-            'check_out_datetime', 'check_out_address', 'trip_distance', 'trip_duration',
-            'trip_amount', 'is_paid', 'created_at', 'updated_at'
+            'vehicle_seat', 'vehicle_seat_details', 'trip', 'trip_details',
+            'check_in_lat', 'check_in_lng', 'check_in_datetime', 'check_in_address',
+            'check_out_lat', 'check_out_lng', 'check_out_datetime', 'check_out_address',
+            'trip_distance', 'trip_duration', 'trip_amount', 'is_paid',
+            'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
     

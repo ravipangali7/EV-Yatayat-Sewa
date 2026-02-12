@@ -33,15 +33,15 @@ class UserAdmin(BaseUserAdmin):
 @admin.register(SuperSetting)
 class SuperSettingAdmin(admin.ModelAdmin):
     """SuperSetting admin"""
-    list_display = ('id', 'per_km_charge', 'created_at', 'updated_at')
-    list_editable = ('per_km_charge',)
+    list_display = ('id', 'per_km_charge', 'gps_threshold', 'created_at', 'updated_at')
+    list_editable = ('per_km_charge', 'gps_threshold')
     readonly_fields = ('created_at', 'updated_at')
 
 
 @admin.register(Wallet)
 class WalletAdmin(admin.ModelAdmin):
     """Wallet admin"""
-    list_display = ('id', 'user', 'balance', 'to_be_pay', 'to_be_received', 'created_at', 'updated_at')
+    list_display = ('id', 'user', 'balance', 'to_pay', 'to_receive', 'created_at', 'updated_at')
     list_filter = ('created_at', 'updated_at')
     search_fields = ('user__username', 'user__phone', 'user__name')
     readonly_fields = ('created_at', 'updated_at')

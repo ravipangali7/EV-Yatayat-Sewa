@@ -51,8 +51,8 @@ def wallet_list_get_view(request):
                 'is_active': wallet.user.is_active,
             },
             'balance': str(wallet.balance),
-            'to_be_pay': str(wallet.to_be_pay),
-            'to_be_received': str(wallet.to_be_received),
+            'to_pay': str(wallet.to_pay),
+            'to_receive': str(wallet.to_receive),
             'created_at': wallet.created_at.isoformat(),
             'updated_at': wallet.updated_at.isoformat(),
         })
@@ -71,8 +71,8 @@ def wallet_list_post_view(request):
     # Extract data from request.POST or request.data
     user_id = request.POST.get('user') or request.data.get('user')
     balance = request.POST.get('balance') or request.data.get('balance', '0')
-    to_be_pay = request.POST.get('to_be_pay') or request.data.get('to_be_pay', '0')
-    to_be_received = request.POST.get('to_be_received') or request.data.get('to_be_received', '0')
+    to_pay = request.POST.get('to_pay') or request.data.get('to_pay', '0')
+    to_receive = request.POST.get('to_receive') or request.data.get('to_receive', '0')
     
     # Validate required fields
     if not user_id:
@@ -91,8 +91,8 @@ def wallet_list_post_view(request):
     # Convert to Decimal
     try:
         balance = Decimal(str(balance))
-        to_be_pay = Decimal(str(to_be_pay))
-        to_be_received = Decimal(str(to_be_received))
+        to_pay = Decimal(str(to_pay))
+        to_receive = Decimal(str(to_receive))
     except (ValueError, TypeError):
         return Response({'error': 'Invalid decimal values'}, status=status.HTTP_400_BAD_REQUEST)
     
@@ -100,8 +100,8 @@ def wallet_list_post_view(request):
     wallet = Wallet.objects.create(
         user=user,
         balance=balance,
-        to_be_pay=to_be_pay,
-        to_be_received=to_be_received,
+        to_pay=to_pay,
+        to_receive=to_receive,
     )
     
     # Return response
@@ -170,19 +170,19 @@ def wallet_detail_post_view(request, pk):
         except (ValueError, TypeError):
             return Response({'error': 'Invalid balance value'}, status=status.HTTP_400_BAD_REQUEST)
     
-    if 'to_be_pay' in request.POST or 'to_be_pay' in request.data:
-        to_be_pay = request.POST.get('to_be_pay') or request.data.get('to_be_pay')
+    if 'to_pay' in request.POST or 'to_pay' in request.data:
+        to_pay = request.POST.get('to_pay') or request.data.get('to_pay')
         try:
-            wallet.to_be_pay = Decimal(str(to_be_pay))
+            wallet.to_pay = Decimal(str(to_pay))
         except (ValueError, TypeError):
-            return Response({'error': 'Invalid to_be_pay value'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'Invalid to_pay value'}, status=status.HTTP_400_BAD_REQUEST)
     
-    if 'to_be_received' in request.POST or 'to_be_received' in request.data:
-        to_be_received = request.POST.get('to_be_received') or request.data.get('to_be_received')
+    if 'to_receive' in request.POST or 'to_receive' in request.data:
+        to_receive = request.POST.get('to_receive') or request.data.get('to_receive')
         try:
-            wallet.to_be_received = Decimal(str(to_be_received))
+            wallet.to_receive = Decimal(str(to_receive))
         except (ValueError, TypeError):
-            return Response({'error': 'Invalid to_be_received value'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'Invalid to_receive value'}, status=status.HTTP_400_BAD_REQUEST)
     
     if 'user' in request.POST or 'user' in request.data:
         user_id = request.POST.get('user') or request.data.get('user')

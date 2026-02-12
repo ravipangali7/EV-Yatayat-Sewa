@@ -147,6 +147,106 @@ class VehicleImage(models.Model):
         return f"{self.vehicle.name} - {self.title or 'Image'}"
 
 
+class VehicleSchedule(models.Model):
+    """Scheduled trip for a vehicle on a route"""
+    id = models.BigAutoField(primary_key=True)
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, related_name='vehicle_schedules')
+    route = models.ForeignKey(Route, on_delete=models.CASCADE, related_name='vehicle_schedules')
+    date = models.DateField()
+    time = models.TimeField()
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
+    updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
+
+    class Meta:
+        db_table = 'vehicle_schedules'
+        indexes = [
+            models.Index(fields=['vehicle', 'date']),
+            models.Index(fields=['route', 'date']),
+        ]
+
+    def __str__(self):
+        return f"{self.vehicle.name} - {self.route.name} ({self.date} {self.time})"
+
+
+class Trip(models.Model):
+    """Trip model for a vehicle/driver/route"""
+    id = models.BigAutoField(primary_key=True)
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, related_name='trips')
+    driver = models.ForeignKey('core.User', on_delete=models.CASCADE, related_name='trips', limit_choices_to={'is_driver': True})
+    route = models.ForeignKey(Route, on_delete=models.CASCADE, related_name='trips')
+    trip_id = models.CharField(max_length=100, unique=True, db_index=True)
+    start_time = models.DateTimeField(null=True, blank=True)
+    end_time = models.DateTimeField(null=True, blank=True)
+    remarks = models.TextField(blank=True, null=True)
+    is_scheduled = models.BooleanField(default=False)
+    vehicle_schedule = models.ForeignKey(VehicleSchedule, on_delete=models.SET_NULL, null=True, blank=True, related_name='trips')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
+    updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
+
+    class Meta:
+        db_table = 'trips'
+        indexes = [
+            models.Index(fields=['vehicle', 'start_time']),
+            models.Index(fields=['driver', 'start_time']),
+            models.Index(fields=['route']),
+            models.Index(fields=['end_time']),
+        ]
+
+    def __str__(self):
+        return f"{self.trip_id} - {self.vehicle.name}"
+
+
+class Location(models.Model):
+    """Location record for vehicle/trip"""
+    id = models.BigAutoField(primary_key=True)
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, related_name='locations')
+    trip = models.ForeignKey(Trip, on_delete=models.CASCADE, null=True, blank=True, related_name='locations')
+    latitude = models.DecimalField(max_digits=20, decimal_places=16)
+    longitude = models.DecimalField(max_digits=20, decimal_places=16)
+    speed = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
+    updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
+
+    class Meta:
+        db_table = 'locations'
+        indexes = [
+            models.Index(fields=['vehicle', 'created_at']),
+            models.Index(fields=['trip', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.vehicle.name} @ ({self.latitude}, {self.longitude})"
+
+
+class VehicleTicketBooking(models.Model):
+    """Ticket booking for a scheduled vehicle trip"""
+    id = models.BigAutoField(primary_key=True)
+    user = models.ForeignKey('core.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='vehicle_ticket_bookings')
+    is_guest = models.BooleanField(default=False)
+    name = models.CharField(max_length=255)
+    phone = models.CharField(max_length=100)
+    vehicle_schedule = models.ForeignKey(VehicleSchedule, on_delete=models.CASCADE, related_name='ticket_bookings')
+    ticket_id = models.CharField(max_length=100, unique=True, db_index=True)
+    seat = models.JSONField(default=dict)  # e.g. {"side": "A", "number": 1}
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    is_paid = models.BooleanField(default=False)
+    pnr = models.CharField(max_length=100, db_index=True)  # EYS{ticket_id}
+    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
+    updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
+
+    class Meta:
+        db_table = 'vehicle_ticket_bookings'
+        indexes = [
+            models.Index(fields=['vehicle_schedule']),
+            models.Index(fields=['user']),
+            models.Index(fields=['pnr']),
+        ]
+
+    def __str__(self):
+        return f"{self.pnr} - {self.name}"
+
+
 class SeatBooking(models.Model):
     """Seat booking model"""
     id = models.BigAutoField(primary_key=True)
@@ -154,6 +254,7 @@ class SeatBooking(models.Model):
     is_guest = models.BooleanField(default=False)
     vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, related_name='seat_bookings')
     vehicle_seat = models.ForeignKey(VehicleSeat, on_delete=models.CASCADE, related_name='bookings')
+    trip = models.ForeignKey(Trip, on_delete=models.SET_NULL, null=True, blank=True, related_name='seat_bookings')
     check_in_lat = models.DecimalField(max_digits=20, decimal_places=16)
     check_in_lng = models.DecimalField(max_digits=20, decimal_places=16)
     check_in_datetime = models.DateTimeField()

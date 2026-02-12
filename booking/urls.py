@@ -3,7 +3,11 @@ from .views import (
     place_views,
     route_views,
     vehicle_views,
-    seat_booking_views
+    seat_booking_views,
+    trip_views,
+    location_views,
+    vehicle_schedule_views,
+    vehicle_ticket_booking_views,
 )
 
 urlpatterns = [
@@ -62,4 +66,26 @@ urlpatterns = [
     path('seat-bookings/book/', seat_booking_views.seat_booking_create_view, name='seat-booking-create'),
     path('seat-bookings/switch/', seat_booking_views.seat_booking_switch_view, name='seat-booking-switch'),
     path('seat-bookings/checkout/', seat_booking_views.seat_booking_checkout_view, name='seat-booking-checkout'),
+    # Trip endpoints
+    path('trips/start/', trip_views.trip_start_view, name='trip-start'),
+    path('trips/', trip_views.trip_list_get_view, name='trip-list-get'),
+    path('trips/<int:pk>/', trip_views.trip_detail_get_view, name='trip-detail-get'),
+    path('trips/<int:pk>/edit/', trip_views.trip_detail_post_view, name='trip-detail-post'),
+    path('trips/<int:pk>/end/', trip_views.trip_end_view, name='trip-end'),
+    path('trips/<int:pk>/delete/', trip_views.trip_delete_get_view, name='trip-delete'),
+    # Location endpoints
+    path('locations/', location_views.location_list_get_view, name='location-list-get'),
+    path('locations/create/', location_views.location_list_post_view, name='location-list-post'),
+    # Vehicle Schedule endpoints
+    path('vehicle-schedules/', vehicle_schedule_views.vehicle_schedule_list_get_view, name='vehicle-schedule-list-get'),
+    path('vehicle-schedules/create/', vehicle_schedule_views.vehicle_schedule_list_post_view, name='vehicle-schedule-list-post'),
+    path('vehicle-schedules/<int:pk>/', vehicle_schedule_views.vehicle_schedule_detail_get_view, name='vehicle-schedule-detail-get'),
+    path('vehicle-schedules/<int:pk>/edit/', vehicle_schedule_views.vehicle_schedule_detail_post_view, name='vehicle-schedule-detail-post'),
+    path('vehicle-schedules/<int:pk>/delete/', vehicle_schedule_views.vehicle_schedule_delete_get_view, name='vehicle-schedule-delete'),
+    # Vehicle Ticket Booking endpoints
+    path('vehicle-ticket-bookings/', vehicle_ticket_booking_views.vehicle_ticket_booking_list_get_view, name='vehicle-ticket-booking-list-get'),
+    path('vehicle-ticket-bookings/create/', vehicle_ticket_booking_views.vehicle_ticket_booking_list_post_view, name='vehicle-ticket-booking-list-post'),
+    path('vehicle-ticket-bookings/<int:pk>/', vehicle_ticket_booking_views.vehicle_ticket_booking_detail_get_view, name='vehicle-ticket-booking-detail-get'),
+    path('vehicle-ticket-bookings/<int:pk>/edit/', vehicle_ticket_booking_views.vehicle_ticket_booking_detail_post_view, name='vehicle-ticket-booking-detail-post'),
+    path('vehicle-ticket-bookings/<int:pk>/delete/', vehicle_ticket_booking_views.vehicle_ticket_booking_delete_get_view, name='vehicle-ticket-booking-delete'),
 ]

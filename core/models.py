@@ -55,6 +55,7 @@ class SuperSetting(models.Model):
     """Super settings for the application"""
     id = models.BigAutoField(primary_key=True)
     per_km_charge = models.DecimalField(max_digits=10, decimal_places=2)
+    gps_threshold = models.DecimalField(max_digits=10, decimal_places=2, default=5)  # km radius for destination check
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
     updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
     
@@ -70,8 +71,8 @@ class Wallet(models.Model):
     id = models.BigAutoField(primary_key=True)
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='wallet')
     balance = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    to_be_pay = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    to_be_received = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    to_pay = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    to_receive = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
     updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
     
