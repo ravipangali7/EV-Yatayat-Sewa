@@ -1,9 +1,11 @@
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from django.db.models import Q
 from decimal import Decimal
 from ..models import Wallet, User
+from ..services.wallet_transaction import create_wallet_transaction
 
 
 @api_view(['GET'])
@@ -118,8 +120,8 @@ def wallet_list_post_view(request):
             'is_active': wallet.user.is_active,
         },
         'balance': str(wallet.balance),
-        'to_be_pay': str(wallet.to_be_pay),
-        'to_be_received': str(wallet.to_be_received),
+        'to_pay': str(wallet.to_pay),
+        'to_receive': str(wallet.to_receive),
         'created_at': wallet.created_at.isoformat(),
         'updated_at': wallet.updated_at.isoformat(),
     }, status=status.HTTP_201_CREATED)
@@ -147,8 +149,8 @@ def wallet_detail_get_view(request, pk):
             'is_active': wallet.user.is_active,
         },
         'balance': str(wallet.balance),
-        'to_be_pay': str(wallet.to_be_pay),
-        'to_be_received': str(wallet.to_be_received),
+        'to_pay': str(wallet.to_pay),
+        'to_receive': str(wallet.to_receive),
         'created_at': wallet.created_at.isoformat(),
         'updated_at': wallet.updated_at.isoformat(),
     })
@@ -208,8 +210,8 @@ def wallet_detail_post_view(request, pk):
             'is_active': wallet.user.is_active,
         },
         'balance': str(wallet.balance),
-        'to_be_pay': str(wallet.to_be_pay),
-        'to_be_received': str(wallet.to_be_received),
+        'to_pay': str(wallet.to_pay),
+        'to_receive': str(wallet.to_receive),
         'created_at': wallet.created_at.isoformat(),
         'updated_at': wallet.updated_at.isoformat(),
     })
@@ -224,3 +226,38 @@ def wallet_delete_get_view(request, pk):
         return Response({'message': 'Wallet deleted successfully'})
     except Wallet.DoesNotExist:
         return Response({'error': 'Wallet not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def wallet_my_deposit_view(request):
+    """Deposit/recharge current user's wallet. Adds amount and creates an 'add' transaction."""
+    data = request.data or request.POST
+    amount = data.get('amount')
+    if amount is None:
+        return Response({'error': 'amount is required'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        amount = Decimal(str(amount))
+    except (ValueError, TypeError):
+        return Response({'error': 'Invalid amount'}, status=status.HTTP_400_BAD_REQUEST)
+    if amount <= 0:
+        return Response({'error': 'Amount must be positive'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        wallet = Wallet.objects.get(user=request.user)
+    except Wallet.DoesNotExist:
+        return Response({'error': 'Wallet not found'}, status=status.HTTP_400_BAD_REQUEST)
+    wallet.balance += amount
+    wallet.save(update_fields=['balance', 'updated_at'])
+    create_wallet_transaction(
+        wallet=wallet,
+        user=request.user,
+        amount=amount,
+        type='add',
+        remarks='Deposit',
+        status='success',
+    )
+    return Response({
+        'id': str(wallet.id),
+        'balance': str(wallet.balance),
+        'message': 'Deposit successful',
+    })

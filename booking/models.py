@@ -229,6 +229,7 @@ class VehicleTicketBooking(models.Model):
     id = models.BigAutoField(primary_key=True)
     user = models.ForeignKey('core.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='vehicle_ticket_bookings')
     is_guest = models.BooleanField(default=False)
+    booked_by = models.ForeignKey('core.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='bookings_made')
     name = models.CharField(max_length=255)
     phone = models.CharField(max_length=100)
     vehicle_schedule = models.ForeignKey(VehicleSchedule, on_delete=models.CASCADE, related_name='ticket_bookings')
@@ -245,6 +246,7 @@ class VehicleTicketBooking(models.Model):
         indexes = [
             models.Index(fields=['vehicle_schedule']),
             models.Index(fields=['user']),
+            models.Index(fields=['booked_by']),
             models.Index(fields=['pnr']),
         ]
 

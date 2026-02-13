@@ -114,6 +114,7 @@ class Transaction(models.Model):
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE, related_name='transactions')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='transactions')
+    card = models.ForeignKey('Card', on_delete=models.SET_NULL, null=True, blank=True, related_name='transactions')
     type = models.CharField(max_length=20, choices=TYPE_CHOICES)
     remarks = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
@@ -123,6 +124,7 @@ class Transaction(models.Model):
         db_table = 'transactions'
         indexes = [
             models.Index(fields=['wallet', 'user']),
+            models.Index(fields=['card']),
             models.Index(fields=['status']),
             models.Index(fields=['type']),
         ]

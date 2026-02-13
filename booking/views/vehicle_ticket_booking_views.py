@@ -3,13 +3,16 @@ import json
 import uuid
 from decimal import Decimal
 
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from django.http import HttpResponse
+from django.db import transaction as db_transaction
 
 from ..models import VehicleTicketBooking, VehicleSchedule, VehicleSeat
-from core.models import User
+from core.models import User, Wallet
+from core.services.wallet_transaction import create_wallet_transaction
 
 
 def _seat_to_list(seat):
@@ -29,6 +32,7 @@ def _ticket_booking_to_response(b, include_schedule_details=False):
         'id': str(b.id),
         'user': str(b.user.id) if b.user else None,
         'is_guest': b.is_guest,
+        'booked_by': str(b.booked_by.id) if b.booked_by_id else None,
         'name': b.name,
         'phone': b.phone,
         'vehicle_schedule': str(b.vehicle_schedule.id),
@@ -59,19 +63,23 @@ def _ticket_booking_to_response(b, include_schedule_details=False):
 def vehicle_ticket_booking_list_get_view(request):
     vs_id = request.query_params.get('vehicle_schedule')
     user_id = request.query_params.get('user')
-    queryset = VehicleTicketBooking.objects.select_related('user', 'vehicle_schedule').all()
+    booked_by_id = request.query_params.get('booked_by')
+    queryset = VehicleTicketBooking.objects.select_related('user', 'booked_by', 'vehicle_schedule').all()
     if vs_id:
         queryset = queryset.filter(vehicle_schedule_id=vs_id)
     if user_id:
         queryset = queryset.filter(user_id=user_id)
+    if booked_by_id:
+        queryset = queryset.filter(booked_by_id=booked_by_id)
     page = int(request.query_params.get('page', 1))
     per_page = int(request.query_params.get('per_page', 10))
     start = (page - 1) * per_page
     end = start + per_page
     total = queryset.count()
     items = queryset.order_by('-created_at')[start:end]
+    expand = request.query_params.get('expand', '').lower() in ('1', 'true', 'yes')
     return Response({
-        'results': [_ticket_booking_to_response(b) for b in items],
+        'results': [_ticket_booking_to_response(b, include_schedule_details=expand) for b in items],
         'count': total,
         'page': page,
         'per_page': per_page,
@@ -95,7 +103,7 @@ def vehicle_ticket_booking_list_post_view(request):
         return Response({'error': 'name, phone, vehicle_schedule are required'}, status=status.HTTP_400_BAD_REQUEST)
 
     is_guest = is_guest.lower() == 'true' if isinstance(is_guest, str) else bool(is_guest)
-    if not is_guest and not user_id:
+    if not request.user.is_authenticated and not is_guest and not user_id:
         return Response({'error': 'user required when not guest'}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
@@ -148,33 +156,98 @@ def vehicle_ticket_booking_list_post_view(request):
     total_price = vs.price * len(seats_list)
 
     user = None
-    if user_id:
+    booked_by = None
+    # Logged-in user: always set user=request.user, is_guest=False (ignore client user/id)
+    if request.user.is_authenticated:
+        user = request.user
+        is_guest = False
+        if getattr(request.user, 'is_ticket_dealer', False):
+            booked_by = request.user
+    elif user_id:
         try:
             user = User.objects.get(pk=user_id)
         except User.DoesNotExist:
             return Response({'error': 'User not found'}, status=status.HTTP_400_BAD_REQUEST)
 
     pnr = f"EYS{ticket_id}"
+    is_paid_val = is_paid.lower() == 'true' if isinstance(is_paid, str) else bool(is_paid)
     b = VehicleTicketBooking.objects.create(
         user=user,
         is_guest=is_guest,
+        booked_by=booked_by,
         name=name,
         phone=phone,
         vehicle_schedule=vs,
         ticket_id=ticket_id,
         seat=seats_list,
         price=total_price,
-        is_paid=is_paid.lower() == 'true' if isinstance(is_paid, str) else bool(is_paid),
+        is_paid=is_paid_val,
         pnr=pnr,
     )
     return Response(_ticket_booking_to_response(b), status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def vehicle_ticket_booking_pay_view(request, pk):
+    """Pay for a booking from wallet. Creates deducted transaction; if dealer, adds commission."""
+    try:
+        b = VehicleTicketBooking.objects.select_related('vehicle_schedule').get(pk=pk)
+    except VehicleTicketBooking.DoesNotExist:
+        return Response({'error': 'Vehicle ticket booking not found'}, status=status.HTTP_404_NOT_FOUND)
+    if b.is_paid:
+        return Response({'error': 'Booking is already paid'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        wallet = Wallet.objects.get(user=request.user)
+    except Wallet.DoesNotExist:
+        return Response(
+            {'error': 'Wallet not found', 'code': 'no_wallet'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    amount = b.price
+    if wallet.balance < amount:
+        return Response(
+            {'error': 'Insufficient wallet balance. Please recharge.', 'code': 'insufficient_balance'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    commission = Decimal('0')
+    if getattr(request.user, 'is_ticket_dealer', False) and getattr(request.user, 'ticket_commission', None):
+        try:
+            commission = amount * (request.user.ticket_commission / Decimal('100'))
+        except (TypeError, ValueError):
+            pass
+    with db_transaction.atomic():
+        wallet.balance -= amount
+        wallet.save(update_fields=['balance', 'updated_at'])
+        create_wallet_transaction(
+            wallet=wallet,
+            user=request.user,
+            amount=amount,
+            type='deducted',
+            remarks=f'Ticket payment {b.pnr}',
+            status='success',
+        )
+        b.is_paid = True
+        b.save(update_fields=['is_paid', 'updated_at'])
+        if commission > 0:
+            wallet.balance += commission
+            wallet.save(update_fields=['balance', 'updated_at'])
+            create_wallet_transaction(
+                wallet=wallet,
+                user=request.user,
+                amount=commission,
+                type='add',
+                remarks=f'Commission for {b.pnr}',
+                status='success',
+            )
+    return Response(_ticket_booking_to_response(b, include_schedule_details=True))
 
 
 @api_view(['GET'])
 def vehicle_ticket_booking_detail_get_view(request, pk):
     try:
         b = VehicleTicketBooking.objects.select_related(
-            'user', 'vehicle_schedule', 'vehicle_schedule__vehicle',
+            'user', 'booked_by', 'vehicle_schedule', 'vehicle_schedule__vehicle',
             'vehicle_schedule__route', 'vehicle_schedule__route__start_point',
             'vehicle_schedule__route__end_point'
         ).get(pk=pk)

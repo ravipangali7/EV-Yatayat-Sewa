@@ -4,7 +4,8 @@ from .views import (
     user_views,
     wallet_views,
     transaction_views,
-    super_setting_views
+    super_setting_views,
+    card_views,
 )
 
 urlpatterns = [
@@ -30,6 +31,13 @@ urlpatterns = [
     path('wallets/<int:pk>/', wallet_views.wallet_detail_get_view, name='wallet-detail-get'),
     path('wallets/<int:pk>/edit/', wallet_views.wallet_detail_post_view, name='wallet-detail-post'),
     path('wallets/<int:pk>/delete/', wallet_views.wallet_delete_get_view, name='wallet-delete'),
+    path('wallets/my/deposit/', wallet_views.wallet_my_deposit_view, name='wallet-my-deposit'),
+    
+    # Card endpoints
+    path('cards/', card_views.card_list_get_view, name='card-list-get'),
+    path('cards/search/', card_views.card_search_by_number_view, name='card-search'),
+    path('cards/<int:pk>/', card_views.card_detail_get_view, name='card-detail-get'),
+    path('cards/<int:pk>/topup/', card_views.card_topup_view, name='card-topup'),
     
     # Transaction endpoints
     path('transactions/', transaction_views.transaction_list_get_view, name='transaction-list-get'),
