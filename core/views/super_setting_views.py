@@ -30,6 +30,7 @@ def super_setting_list_get_view(request):
             'id': str(setting.id),
             'per_km_charge': str(setting.per_km_charge),
             'gps_threshold': str(setting.gps_threshold),
+            'seat_layout': getattr(setting, 'seat_layout', []) or [],
             'created_at': setting.created_at.isoformat(),
             'updated_at': setting.updated_at.isoformat(),
         })
@@ -65,10 +66,21 @@ def super_setting_list_post_view(request):
     except (ValueError, TypeError):
         gps_threshold = Decimal('5')
     
+    seat_layout = request.POST.get('seat_layout') or request.data.get('seat_layout')
+    if seat_layout is not None and isinstance(seat_layout, str):
+        import json
+        try:
+            seat_layout = json.loads(seat_layout) if seat_layout else []
+        except json.JSONDecodeError:
+            seat_layout = []
+    if not isinstance(seat_layout, list):
+        seat_layout = []
+    
     # Create setting directly without serializer
     setting = SuperSetting.objects.create(
         per_km_charge=per_km_charge,
         gps_threshold=gps_threshold,
+        seat_layout=seat_layout,
     )
     
     # Return response
@@ -76,6 +88,7 @@ def super_setting_list_post_view(request):
         'id': str(setting.id),
         'per_km_charge': str(setting.per_km_charge),
         'gps_threshold': str(setting.gps_threshold),
+        'seat_layout': setting.seat_layout,
         'created_at': setting.created_at.isoformat(),
         'updated_at': setting.updated_at.isoformat(),
     }, status=status.HTTP_201_CREATED)
@@ -94,6 +107,7 @@ def super_setting_detail_get_view(request, pk):
         'id': str(setting.id),
         'per_km_charge': str(setting.per_km_charge),
         'gps_threshold': str(setting.gps_threshold),
+        'seat_layout': getattr(setting, 'seat_layout', []) or [],
         'created_at': setting.created_at.isoformat(),
         'updated_at': setting.updated_at.isoformat(),
     })
@@ -122,6 +136,18 @@ def super_setting_detail_post_view(request, pk):
         except (ValueError, TypeError):
             return Response({'error': 'Invalid gps_threshold value'}, status=status.HTTP_400_BAD_REQUEST)
     
+    if 'seat_layout' in request.POST or 'seat_layout' in request.data:
+        seat_layout = request.POST.get('seat_layout') or request.data.get('seat_layout')
+        if seat_layout is not None:
+            if isinstance(seat_layout, str):
+                import json
+                try:
+                    seat_layout = json.loads(seat_layout) if seat_layout else []
+                except json.JSONDecodeError:
+                    seat_layout = []
+            if isinstance(seat_layout, list):
+                setting.seat_layout = seat_layout
+    
     setting.save()
     
     # Return updated data
@@ -129,6 +155,7 @@ def super_setting_detail_post_view(request, pk):
         'id': str(setting.id),
         'per_km_charge': str(setting.per_km_charge),
         'gps_threshold': str(setting.gps_threshold),
+        'seat_layout': getattr(setting, 'seat_layout', []) or [],
         'created_at': setting.created_at.isoformat(),
         'updated_at': setting.updated_at.isoformat(),
     })

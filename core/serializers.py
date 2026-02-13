@@ -113,9 +113,11 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            'id', 'username', 'phone', 'email', 'name', 
+            'id', 'username', 'phone', 'email', 'name',
             'profile_picture', 'fcm_token', 'token', 'biometric_token',
             'is_driver', 'is_superuser', 'is_staff', 'is_active',
+            'license_no', 'license_image', 'license_type', 'license_expiry_date',
+            'is_ticket_dealer', 'ticket_commission',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'is_superuser', 'is_staff', 'username']
@@ -219,5 +221,5 @@ class SuperSettingSerializer(serializers.ModelSerializer):
     """Serializer for SuperSetting model"""
     class Meta:
         model = SuperSetting
-        fields = ['id', 'per_km_charge', 'created_at', 'updated_at']
+        fields = ['id', 'per_km_charge', 'gps_threshold', 'seat_layout', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']

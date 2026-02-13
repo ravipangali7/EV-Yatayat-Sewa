@@ -62,7 +62,7 @@ class VehicleImageInline(admin.StackedInline):
 @admin.register(Vehicle)
 class VehicleAdmin(admin.ModelAdmin):
     """Vehicle admin"""
-    list_display = ('id', 'name', 'vehicle_no', 'vehicle_type', 'imei', 'odometer', 'overspeed_limit', 'is_active', 'active_driver', 'active_route', 'created_at', 'updated_at')
+    list_display = ('id', 'name', 'vehicle_no', 'vehicle_type', 'imei', 'odometer', 'overspeed_limit', 'bill_book_expiry_date', 'insurance_expiry_date', 'road_permit_expiry_date', 'is_active', 'active_driver', 'active_route', 'created_at', 'updated_at')
     list_filter = ('vehicle_type', 'is_active', 'created_at', 'updated_at')
     search_fields = ('name', 'vehicle_no', 'imei')
     list_editable = ('name', 'vehicle_type', 'odometer', 'overspeed_limit', 'is_active')

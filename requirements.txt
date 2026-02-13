@@ -8,6 +8,7 @@ django-rest-framework==0.1.0
 djangorestframework==3.16.1
 idna==3.11
 pillow==12.1.0
+reportlab==4.2.5
 requests==2.32.5
 sqlparse==0.5.5
 tzdata==2025.3

@@ -16,6 +16,13 @@ class User(AbstractUser):
     token = models.CharField(max_length=500, null=True, blank=True)
     biometric_token = models.CharField(max_length=500, null=True, blank=True, db_column='biometric_token')
     is_driver = models.BooleanField(default=False)
+    # License and ticket dealer
+    license_no = models.CharField(max_length=100, blank=True, null=True)
+    license_image = models.ImageField(upload_to='uploads/licenses/', blank=True, null=True)
+    license_type = models.CharField(max_length=50, blank=True, null=True)
+    license_expiry_date = models.DateField(null=True, blank=True)
+    is_ticket_dealer = models.BooleanField(default=False)
+    ticket_commission = models.DecimalField(max_digits=10, decimal_places=2, default=0, null=True, blank=True)
     
     first_name = None
     last_name = None
@@ -56,6 +63,7 @@ class SuperSetting(models.Model):
     id = models.BigAutoField(primary_key=True)
     per_km_charge = models.DecimalField(max_digits=10, decimal_places=2)
     gps_threshold = models.DecimalField(max_digits=10, decimal_places=2, default=5)  # km radius for destination check
+    seat_layout = models.JSONField(default=list, blank=True)  # e.g. ["x","-","-","y",":", ...]
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
     updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
     
@@ -121,6 +129,27 @@ class Transaction(models.Model):
     
     def __str__(self):
         return f"Transaction {self.id} - {self.type} {self.amount} ({self.status})"
+
+
+class Card(models.Model):
+    """Card model for user card balance"""
+    id = models.BigAutoField(primary_key=True)
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='cards')
+    card_number = models.CharField(max_length=100, unique=True, db_index=True)
+    balance = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
+    updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
+
+    class Meta:
+        db_table = 'cards'
+        indexes = [
+            models.Index(fields=['card_number']),
+            models.Index(fields=['user']),
+        ]
+
+    def __str__(self):
+        return f"Card {self.card_number} (Balance: {self.balance})"
 
 
 class OTPVerification(models.Model):

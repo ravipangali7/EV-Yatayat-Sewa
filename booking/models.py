@@ -80,6 +80,11 @@ class Vehicle(models.Model):
     routes = models.ManyToManyField(Route, related_name='vehicles', blank=True)
     active_route = models.ForeignKey(Route, on_delete=models.SET_NULL, null=True, blank=True, related_name='active_vehicles_route')
     is_active = models.BooleanField(default=True)
+    bill_book = models.CharField(max_length=255, blank=True, null=True)
+    bill_book_expiry_date = models.DateField(null=True, blank=True)
+    insurance_expiry_date = models.DateField(null=True, blank=True)
+    road_permit_expiry_date = models.DateField(null=True, blank=True)
+    seat_layout = models.JSONField(default=list, blank=True)  # e.g. ["x","-","-","y",":", ...]
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
     updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
     
@@ -228,7 +233,7 @@ class VehicleTicketBooking(models.Model):
     phone = models.CharField(max_length=100)
     vehicle_schedule = models.ForeignKey(VehicleSchedule, on_delete=models.CASCADE, related_name='ticket_bookings')
     ticket_id = models.CharField(max_length=100, unique=True, db_index=True)
-    seat = models.JSONField(default=dict)  # e.g. {"side": "A", "number": 1}
+    seat = models.JSONField(default=dict)  # list e.g. [{"side": "A", "number": 1}, ...] or legacy single dict
     price = models.DecimalField(max_digits=10, decimal_places=2)
     is_paid = models.BooleanField(default=False)
     pnr = models.CharField(max_length=100, db_index=True)  # EYS{ticket_id}

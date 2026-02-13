@@ -88,4 +88,5 @@ urlpatterns = [
     path('vehicle-ticket-bookings/<int:pk>/', vehicle_ticket_booking_views.vehicle_ticket_booking_detail_get_view, name='vehicle-ticket-booking-detail-get'),
     path('vehicle-ticket-bookings/<int:pk>/edit/', vehicle_ticket_booking_views.vehicle_ticket_booking_detail_post_view, name='vehicle-ticket-booking-detail-post'),
     path('vehicle-ticket-bookings/<int:pk>/delete/', vehicle_ticket_booking_views.vehicle_ticket_booking_delete_get_view, name='vehicle-ticket-booking-delete'),
+    path('vehicle-ticket-bookings/<int:pk>/ticket-pdf/', vehicle_ticket_booking_views.vehicle_ticket_booking_ticket_pdf_view, name='vehicle-ticket-booking-ticket-pdf'),
 ]

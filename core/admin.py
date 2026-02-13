@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from .models import User, SuperSetting, Wallet, Transaction
+from .models import User, SuperSetting, Wallet, Transaction, Card
 
 
 @admin.register(User)
@@ -18,6 +18,7 @@ class UserAdmin(BaseUserAdmin):
         }),
         ('Important dates', {'fields': ('last_login', 'date_joined')}),
         ('Additional Info', {'fields': ('phone', 'profile_picture', 'fcm_token', 'token', 'biometric_token', 'is_driver')}),
+        ('License & Ticket Dealer', {'fields': ('license_no', 'license_image', 'license_type', 'license_expiry_date', 'is_ticket_dealer', 'ticket_commission')}),
     )
     
     # Override add_fieldsets to exclude first_name and last_name
@@ -36,6 +37,7 @@ class SuperSettingAdmin(admin.ModelAdmin):
     list_display = ('id', 'per_km_charge', 'gps_threshold', 'created_at', 'updated_at')
     list_editable = ('per_km_charge', 'gps_threshold')
     readonly_fields = ('created_at', 'updated_at')
+    list_filter = ('created_at', 'updated_at')
 
 
 @admin.register(Wallet)
@@ -57,3 +59,13 @@ class TransactionAdmin(admin.ModelAdmin):
     readonly_fields = ('created_at', 'updated_at')
     raw_id_fields = ('user', 'wallet')
     date_hierarchy = 'created_at'
+
+
+@admin.register(Card)
+class CardAdmin(admin.ModelAdmin):
+    """Card admin"""
+    list_display = ('id', 'card_number', 'user', 'balance', 'is_active', 'created_at', 'updated_at')
+    list_filter = ('is_active', 'created_at', 'updated_at')
+    search_fields = ('card_number', 'user__username', 'user__phone')
+    readonly_fields = ('created_at', 'updated_at')
+    raw_id_fields = ('user',)

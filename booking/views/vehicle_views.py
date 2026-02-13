@@ -5,8 +5,21 @@ from rest_framework.permissions import IsAuthenticated
 from django.db.models import Q
 from decimal import Decimal
 import json
+from datetime import datetime
 from ..models import Vehicle, VehicleSeat, VehicleImage, Route, Trip
-from core.models import User
+from core.models import User, SuperSetting
+
+
+def _parse_date(val):
+    """Parse date from string or return None."""
+    if val is None or val == '':
+        return None
+    if hasattr(val, 'isoformat'):
+        return val
+    try:
+        return datetime.strptime(str(val)[:10], '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return None
 
 
 def _get_active_trip_for_vehicle(vehicle):
@@ -187,6 +200,11 @@ def vehicle_list_get_view(request):
             'active_route_details': active_route_details,
             'active_trip': _get_active_trip_for_vehicle(vehicle),
             'is_active': vehicle.is_active,
+            'bill_book': vehicle.bill_book or '',
+            'bill_book_expiry_date': vehicle.bill_book_expiry_date.isoformat() if vehicle.bill_book_expiry_date else None,
+            'insurance_expiry_date': vehicle.insurance_expiry_date.isoformat() if vehicle.insurance_expiry_date else None,
+            'road_permit_expiry_date': vehicle.road_permit_expiry_date.isoformat() if vehicle.road_permit_expiry_date else None,
+            'seat_layout': getattr(vehicle, 'seat_layout', []) or [],
             'seats': seats,
             'images': images,
             'created_at': vehicle.created_at.isoformat(),
@@ -215,6 +233,11 @@ def vehicle_list_post_view(request):
     active_driver_id = request.POST.get('active_driver') or request.data.get('active_driver') or None
     active_route_id = request.POST.get('active_route') or request.data.get('active_route') or None
     is_active = request.POST.get('is_active') or request.data.get('is_active', 'true')
+    bill_book = request.POST.get('bill_book') or request.data.get('bill_book') or None
+    bill_book_expiry_date = request.POST.get('bill_book_expiry_date') or request.data.get('bill_book_expiry_date')
+    insurance_expiry_date = request.POST.get('insurance_expiry_date') or request.data.get('insurance_expiry_date')
+    road_permit_expiry_date = request.POST.get('road_permit_expiry_date') or request.data.get('road_permit_expiry_date')
+    seat_layout = request.POST.get('seat_layout') or request.data.get('seat_layout')
     
     # Handle nested data
     seats_data = request.POST.get('seats') or request.data.get('seats', [])
@@ -268,6 +291,29 @@ def vehicle_list_post_view(request):
     # Handle file uploads
     featured_image = request.FILES.get('featured_image')
     
+    # Default seat_layout from SuperSetting if not provided
+    if seat_layout is not None:
+        if isinstance(seat_layout, str):
+            try:
+                seat_layout = json.loads(seat_layout) if seat_layout else []
+            except json.JSONDecodeError:
+                seat_layout = []
+        if not isinstance(seat_layout, list):
+            seat_layout = []
+    else:
+        try:
+            ss = SuperSetting.objects.latest('created_at')
+            seat_layout = getattr(ss, 'seat_layout', None) or []
+            if not isinstance(seat_layout, list):
+                seat_layout = []
+        except SuperSetting.DoesNotExist:
+            seat_layout = []
+    
+    # Parse date fields
+    bill_book_expiry_date = _parse_date(bill_book_expiry_date)
+    insurance_expiry_date = _parse_date(insurance_expiry_date)
+    road_permit_expiry_date = _parse_date(road_permit_expiry_date)
+    
     # Create vehicle directly without serializer
     vehicle = Vehicle.objects.create(
         imei=imei,
@@ -281,6 +327,11 @@ def vehicle_list_post_view(request):
         active_driver_id=active_driver_id if active_driver_id else None,
         active_route_id=active_route_id if active_route_id else None,
         is_active=is_active,
+        bill_book=bill_book,
+        bill_book_expiry_date=bill_book_expiry_date,
+        insurance_expiry_date=insurance_expiry_date,
+        road_permit_expiry_date=road_permit_expiry_date,
+        seat_layout=seat_layout,
     )
     
     # Handle many-to-many relationships
@@ -445,6 +496,11 @@ def vehicle_list_post_view(request):
         'active_route_details': active_route_details,
         'active_trip': _get_active_trip_for_vehicle(vehicle),
         'is_active': vehicle.is_active,
+        'bill_book': vehicle.bill_book or '',
+        'bill_book_expiry_date': vehicle.bill_book_expiry_date.isoformat() if vehicle.bill_book_expiry_date else None,
+        'insurance_expiry_date': vehicle.insurance_expiry_date.isoformat() if vehicle.insurance_expiry_date else None,
+        'road_permit_expiry_date': vehicle.road_permit_expiry_date.isoformat() if vehicle.road_permit_expiry_date else None,
+        'seat_layout': getattr(vehicle, 'seat_layout', []) or [],
         'seats': seats,
         'images': images,
         'created_at': vehicle.created_at.isoformat(),
@@ -575,6 +631,11 @@ def vehicle_detail_get_view(request, pk):
         'active_route_details': active_route_details,
         'active_trip': _get_active_trip_for_vehicle(vehicle),
         'is_active': vehicle.is_active,
+        'bill_book': vehicle.bill_book or '',
+        'bill_book_expiry_date': vehicle.bill_book_expiry_date.isoformat() if vehicle.bill_book_expiry_date else None,
+        'insurance_expiry_date': vehicle.insurance_expiry_date.isoformat() if vehicle.insurance_expiry_date else None,
+        'road_permit_expiry_date': vehicle.road_permit_expiry_date.isoformat() if vehicle.road_permit_expiry_date else None,
+        'seat_layout': getattr(vehicle, 'seat_layout', []) or [],
         'seats': seats,
         'images': images,
         'created_at': vehicle.created_at.isoformat(),
@@ -634,6 +695,28 @@ def vehicle_detail_post_view(request, pk):
     if 'is_active' in request.POST or 'is_active' in request.data:
         is_active = request.POST.get('is_active') or request.data.get('is_active')
         vehicle.is_active = is_active.lower() == 'true' if isinstance(is_active, str) else bool(is_active)
+    
+    if 'bill_book' in request.POST or 'bill_book' in request.data:
+        vehicle.bill_book = request.POST.get('bill_book') or request.data.get('bill_book') or None
+    if 'bill_book_expiry_date' in request.POST or 'bill_book_expiry_date' in request.data:
+        val = request.POST.get('bill_book_expiry_date') or request.data.get('bill_book_expiry_date')
+        vehicle.bill_book_expiry_date = _parse_date(val) if val else None
+    if 'insurance_expiry_date' in request.POST or 'insurance_expiry_date' in request.data:
+        val = request.POST.get('insurance_expiry_date') or request.data.get('insurance_expiry_date')
+        vehicle.insurance_expiry_date = _parse_date(val) if val else None
+    if 'road_permit_expiry_date' in request.POST or 'road_permit_expiry_date' in request.data:
+        val = request.POST.get('road_permit_expiry_date') or request.data.get('road_permit_expiry_date')
+        vehicle.road_permit_expiry_date = _parse_date(val) if val else None
+    if 'seat_layout' in request.POST or 'seat_layout' in request.data:
+        seat_layout = request.POST.get('seat_layout') or request.data.get('seat_layout')
+        if seat_layout is not None:
+            if isinstance(seat_layout, str):
+                try:
+                    seat_layout = json.loads(seat_layout) if seat_layout else []
+                except json.JSONDecodeError:
+                    seat_layout = []
+            if isinstance(seat_layout, list):
+                vehicle.seat_layout = seat_layout
     
     if 'active_driver' in request.POST or 'active_driver' in request.data:
         active_driver_id = request.POST.get('active_driver') or request.data.get('active_driver')
@@ -855,6 +938,11 @@ def vehicle_detail_post_view(request, pk):
         'active_route_details': active_route_details,
         'active_trip': _get_active_trip_for_vehicle(vehicle),
         'is_active': vehicle.is_active,
+        'bill_book': vehicle.bill_book or '',
+        'bill_book_expiry_date': vehicle.bill_book_expiry_date.isoformat() if vehicle.bill_book_expiry_date else None,
+        'insurance_expiry_date': vehicle.insurance_expiry_date.isoformat() if vehicle.insurance_expiry_date else None,
+        'road_permit_expiry_date': vehicle.road_permit_expiry_date.isoformat() if vehicle.road_permit_expiry_date else None,
+        'seat_layout': getattr(vehicle, 'seat_layout', []) or [],
         'seats': seats,
         'images': images,
         'created_at': vehicle.created_at.isoformat(),
@@ -1301,6 +1389,11 @@ def vehicle_connect_view(request):
         'active_route_details': active_route_details,
         'active_trip': _get_active_trip_for_vehicle(vehicle),
         'is_active': vehicle.is_active,
+        'bill_book': vehicle.bill_book or '',
+        'bill_book_expiry_date': vehicle.bill_book_expiry_date.isoformat() if vehicle.bill_book_expiry_date else None,
+        'insurance_expiry_date': vehicle.insurance_expiry_date.isoformat() if vehicle.insurance_expiry_date else None,
+        'road_permit_expiry_date': vehicle.road_permit_expiry_date.isoformat() if vehicle.road_permit_expiry_date else None,
+        'seat_layout': getattr(vehicle, 'seat_layout', []) or [],
         'seats': seats,
         'images': images,
         'created_at': vehicle.created_at.isoformat(),
@@ -1442,6 +1535,11 @@ def vehicle_my_active_get_view(request):
             'active_route_details': active_route_details,
             'active_trip': _get_active_trip_for_vehicle(vehicle),
             'is_active': vehicle.is_active,
+            'bill_book': vehicle.bill_book or '',
+            'bill_book_expiry_date': vehicle.bill_book_expiry_date.isoformat() if vehicle.bill_book_expiry_date else None,
+            'insurance_expiry_date': vehicle.insurance_expiry_date.isoformat() if vehicle.insurance_expiry_date else None,
+            'road_permit_expiry_date': vehicle.road_permit_expiry_date.isoformat() if vehicle.road_permit_expiry_date else None,
+            'seat_layout': getattr(vehicle, 'seat_layout', []) or [],
             'seats': seats,
             'images': images,
             'created_at': vehicle.created_at.isoformat(),
