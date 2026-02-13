@@ -139,7 +139,7 @@ def vehicle_schedule_list_get_view(request):
         from django.db.models import Prefetch
         from ..models import VehicleImage
         vehicles_with_images = Vehicle.objects.filter(id__in=vehicle_ids).prefetch_related(
-            Prefetch('images', queryset=VehicleImage.objects.all()[:20])
+            Prefetch('images', queryset=VehicleImage.objects.all())
         )
         vehicle_map = {v.id: v for v in vehicles_with_images}
 
@@ -154,7 +154,7 @@ def vehicle_schedule_list_get_view(request):
         for s in items:
             v = vehicle_map.get(s.vehicle_id) or s.vehicle
             if hasattr(v, 'images'):
-                s.vehicle._prefetched_images = list(v.images.all()[:20])
+                s.vehicle._prefetched_images = list(v.images.all())[:20]
             row = _schedule_to_response_expanded(s, request)
             total_seats = s.vehicle.seats.count() if hasattr(s.vehicle, 'seats') else 0
             if total_seats == 0:
