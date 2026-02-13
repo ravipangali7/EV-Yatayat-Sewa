@@ -21,11 +21,11 @@ def _seat_to_list(seat):
     return []
 
 
-def _ticket_booking_to_response(b):
+def _ticket_booking_to_response(b, include_schedule_details=False):
     seat = b.seat
     if not isinstance(seat, list):
         seat = _seat_to_list(seat) if seat else []
-    return {
+    data = {
         'id': str(b.id),
         'user': str(b.user.id) if b.user else None,
         'is_guest': b.is_guest,
@@ -40,6 +40,19 @@ def _ticket_booking_to_response(b):
         'created_at': b.created_at.isoformat(),
         'updated_at': b.updated_at.isoformat(),
     }
+    if include_schedule_details and b.vehicle_schedule_id:
+        vs = b.vehicle_schedule
+        route = vs.route if vs else None
+        data['schedule_details'] = {
+            'date': vs.date.strftime('%Y-%m-%d') if vs and vs.date else None,
+            'time': vs.time.strftime('%H:%M') if vs and vs.time else None,
+            'price': str(vs.price) if vs else None,
+            'vehicle_name': vs.vehicle.name if vs and vs.vehicle else None,
+            'route_name': route.name if route else None,
+            'start_point_name': route.start_point.name if route and route.start_point else None,
+            'end_point_name': route.end_point.name if route and route.end_point else None,
+        }
+    return data
 
 
 @api_view(['GET'])
@@ -160,10 +173,15 @@ def vehicle_ticket_booking_list_post_view(request):
 @api_view(['GET'])
 def vehicle_ticket_booking_detail_get_view(request, pk):
     try:
-        b = VehicleTicketBooking.objects.select_related('user', 'vehicle_schedule').get(pk=pk)
+        b = VehicleTicketBooking.objects.select_related(
+            'user', 'vehicle_schedule', 'vehicle_schedule__vehicle',
+            'vehicle_schedule__route', 'vehicle_schedule__route__start_point',
+            'vehicle_schedule__route__end_point'
+        ).get(pk=pk)
     except VehicleTicketBooking.DoesNotExist:
         return Response({'error': 'Vehicle ticket booking not found'}, status=status.HTTP_404_NOT_FOUND)
-    return Response(_ticket_booking_to_response(b))
+    expand = request.query_params.get('expand', '').lower() in ('1', 'true', 'yes')
+    return Response(_ticket_booking_to_response(b, include_schedule_details=expand))
 
 
 @api_view(['POST'])
@@ -193,51 +211,85 @@ def vehicle_ticket_booking_delete_get_view(request, pk):
 
 @api_view(['GET'])
 def vehicle_ticket_booking_ticket_pdf_view(request, pk):
-    """Generate horizontal strip ticket PDF."""
+    """Generate ticket PDF with 6:4 aspect ratio, EV Yatayat Sewa branding."""
     try:
-        b = VehicleTicketBooking.objects.select_related('vehicle_schedule', 'vehicle_schedule__vehicle', 'vehicle_schedule__route').get(pk=pk)
+        b = VehicleTicketBooking.objects.select_related(
+            'vehicle_schedule', 'vehicle_schedule__vehicle', 'vehicle_schedule__route',
+            'vehicle_schedule__route__start_point', 'vehicle_schedule__route__end_point'
+        ).get(pk=pk)
     except VehicleTicketBooking.DoesNotExist:
         return Response({'error': 'Vehicle ticket booking not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    from reportlab.lib.pagesizes import A4
     from reportlab.pdfgen import canvas
     from reportlab.lib.units import mm
     import io
 
-    # Long horizontal strip: e.g. 297mm x 45mm (landscape strip)
-    width = 297 * mm
-    height = 45 * mm
+    # 6:4 aspect ratio: 150mm x 100mm (6*25mm x 4*25mm)
+    width = 150 * mm
+    height = 100 * mm
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=(width, height))
     c.setPageSize((width, height))
 
-    y = height - 8 * mm
-    x = 10 * mm
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(x, y, f"PNR: {b.pnr}")
-    x += 45 * mm
-    c.drawString(x, y, f"Ticket: {b.ticket_id}")
-    x += 40 * mm
-    c.setFont("Helvetica", 9)
-    c.drawString(x, y, f"Name: {b.name}  |  Phone: {b.phone}")
-    x += 75 * mm
-    vs = b.vehicle_schedule
-    vehicle_name = vs.vehicle.name if vs.vehicle else "-"
-    route_name = vs.route.name if vs.route else "-"
-    date_str = vs.date.strftime('%Y-%m-%d') if vs.date else "-"
-    time_str = vs.time.strftime('%H:%M') if vs.time else "-"
-    c.drawString(x, y, f"Vehicle: {vehicle_name}  |  Route: {route_name}  |  {date_str} {time_str}")
+    margin = 6 * mm
+    y = height - margin
 
-    y -= 10 * mm
-    x = 10 * mm
+    # Border
+    c.setLineWidth(0.5)
+    c.rect(2 * mm, 2 * mm, width - 4 * mm, height - 4 * mm)
+
+    # EV Yatayat Sewa branding
+    c.setFont("Helvetica-Bold", 14)
+    c.drawCentredString(width / 2, y, "EV YATAYAT SEWA")
+    y -= 6 * mm
+    c.setFont("Helvetica", 8)
+    c.drawCentredString(width / 2, y, "E-Ticket")
+    y -= 8 * mm
+
+    # Dashed perforation line (optional)
+    c.setDash(2, 2)
+    c.line(margin, y, width - margin, y)
+    c.setDash([])
+    y -= 6 * mm
+
+    vs = b.vehicle_schedule
+    route = vs.route if vs else None
+    start_name = route.start_point.name if route and route.start_point else "-"
+    end_name = route.end_point.name if route and route.end_point else "-"
+    vehicle_name = vs.vehicle.name if vs and vs.vehicle else "-"
+    date_str = vs.date.strftime('%d %b %Y') if vs and vs.date else "-"
+    time_str = vs.time.strftime('%H:%M') if vs and vs.time else "-"
+
+    # Row 1: PNR and Ticket ID
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(margin, y, f"PNR: {b.pnr}")
+    c.drawString(width / 2 + 2 * mm, y, f"Ticket: {b.ticket_id}")
+    y -= 6 * mm
+
+    # Row 2: Route
+    c.setFont("Helvetica", 9)
+    c.drawString(margin, y, "Route:")
+    c.drawString(margin + 18 * mm, y, f"{start_name}  →  {end_name}")
+    y -= 5 * mm
+
+    # Row 3: Vehicle, Date, Time
+    c.drawString(margin, y, f"Vehicle: {vehicle_name}")
+    c.drawString(width / 2 + 2 * mm, y, f"Date: {date_str}  |  Time: {time_str}")
+    y -= 6 * mm
+
+    # Row 4: Passenger
+    c.drawString(margin, y, f"Name: {b.name}")
+    c.drawString(width / 2 + 2 * mm, y, f"Phone: {b.phone}")
+    y -= 6 * mm
+
     seat_list = _seat_to_list(b.seat) if b.seat else []
     seats_str = ", ".join(f"{s.get('side', '')}{s.get('number', '')}" for s in seat_list) or "N/A"
+
+    # Row 5: Seats, Price, Paid
     c.setFont("Helvetica-Bold", 9)
-    c.drawString(x, y, f"Seats: {seats_str}")
-    x += 80 * mm
-    c.drawString(x, y, f"Price: Rs. {b.price}")
-    x += 35 * mm
-    c.drawString(x, y, f"Paid: {'Yes' if b.is_paid else 'No'}")
+    c.drawString(margin, y, f"Seats: {seats_str}")
+    c.drawString(margin + 70 * mm, y, f"Price: Rs. {b.price}")
+    c.drawString(width - margin - 25 * mm, y, f"Paid: {'Yes' if b.is_paid else 'No'}")
 
     c.save()
     buffer.seek(0)

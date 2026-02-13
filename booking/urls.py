@@ -78,6 +78,8 @@ urlpatterns = [
     path('locations/create/', location_views.location_list_post_view, name='location-list-post'),
     # Vehicle Schedule endpoints
     path('vehicle-schedules/', vehicle_schedule_views.vehicle_schedule_list_get_view, name='vehicle-schedule-list-get'),
+    path('vehicle-schedules/start-places/', vehicle_schedule_views.vehicle_schedule_start_places_view, name='vehicle-schedule-start-places'),
+    path('vehicle-schedules/end-places/', vehicle_schedule_views.vehicle_schedule_end_places_view, name='vehicle-schedule-end-places'),
     path('vehicle-schedules/create/', vehicle_schedule_views.vehicle_schedule_list_post_view, name='vehicle-schedule-list-post'),
     path('vehicle-schedules/<int:pk>/', vehicle_schedule_views.vehicle_schedule_detail_get_view, name='vehicle-schedule-detail-get'),
     path('vehicle-schedules/<int:pk>/edit/', vehicle_schedule_views.vehicle_schedule_detail_post_view, name='vehicle-schedule-detail-post'),

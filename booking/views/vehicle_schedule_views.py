@@ -6,7 +6,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 
-from ..models import VehicleSchedule, Vehicle, Route
+from ..models import VehicleSchedule, Vehicle, Route, Place, VehicleTicketBooking
 
 
 def _schedule_to_response(s):
@@ -22,23 +22,155 @@ def _schedule_to_response(s):
     }
 
 
+def _build_media_url(request, path):
+    """Build absolute URL for media file."""
+    if not path:
+        return None
+    if path.startswith('http'):
+        return path
+    base = request.build_absolute_uri('/').rstrip('/')
+    return f"{base}{path}" if path.startswith('/') else f"{base}/{path}"
+
+
+def _schedule_to_response_expanded(s, request):
+    """Response with nested route (start/end place) and vehicle (name, vehicle_no, featured_image, images)."""
+    route = s.route
+    vehicle = s.vehicle
+    route_data = {
+        'id': str(route.id),
+        'name': route.name,
+        'start_point': {'id': str(route.start_point.id), 'name': route.start_point.name, 'code': route.start_point.code},
+        'end_point': {'id': str(route.end_point.id), 'name': route.end_point.name, 'code': route.end_point.code},
+    }
+    featured_image = None
+    if vehicle.featured_image:
+        featured_image = _build_media_url(request, vehicle.featured_image.url)
+    images = []
+    for img in getattr(vehicle, '_prefetched_images', []) or []:
+        if img.image:
+            images.append(_build_media_url(request, img.image.url))
+    if not images and hasattr(vehicle, 'images'):
+        for img in vehicle.images.all()[:20]:
+            if img.image:
+                images.append(_build_media_url(request, img.image.url))
+    vehicle_data = {
+        'id': str(vehicle.id),
+        'name': vehicle.name,
+        'vehicle_no': vehicle.vehicle_no,
+        'featured_image': featured_image,
+        'images': images,
+    }
+    return {
+        'id': str(s.id),
+        'vehicle': str(s.vehicle.id),
+        'route': str(s.route.id),
+        'date': s.date.isoformat(),
+        'time': (s.time.strftime('%H:%M') if s.time else None),
+        'price': str(s.price),
+        'created_at': s.created_at.isoformat(),
+        'updated_at': s.updated_at.isoformat(),
+        'route_details': route_data,
+        'vehicle_details': vehicle_data,
+    }
+
+
+@api_view(['GET'])
+def vehicle_schedule_start_places_view(request):
+    """Distinct places that are start_point of any route which has at least one VehicleSchedule."""
+    places = Place.objects.filter(
+        routes_starting_here__vehicle_schedules__isnull=False
+    ).distinct().order_by('name')
+    return Response([
+        {'id': str(p.id), 'name': p.name, 'code': p.code}
+        for p in places
+    ])
+
+
+@api_view(['GET'])
+def vehicle_schedule_end_places_view(request):
+    """Distinct places that are end_point of routes where start_point=from and route has VehicleSchedule."""
+    from_place_id = request.query_params.get('from')
+    if not from_place_id:
+        return Response({'error': 'from (place id) is required'}, status=status.HTTP_400_BAD_REQUEST)
+    places = Place.objects.filter(
+        routes_ending_here__vehicle_schedules__isnull=False,
+        routes_ending_here__start_point_id=from_place_id
+    ).distinct().order_by('name')
+    return Response([
+        {'id': str(p.id), 'name': p.name, 'code': p.code}
+        for p in places
+    ])
+
+
 @api_view(['GET'])
 def vehicle_schedule_list_get_view(request):
     vehicle_id = request.query_params.get('vehicle')
     route_id = request.query_params.get('route')
-    queryset = VehicleSchedule.objects.select_related('vehicle', 'route').all()
+    date_str = request.query_params.get('date')
+    from_place = request.query_params.get('from_place')
+    to_place = request.query_params.get('to_place')
+    expand = request.query_params.get('expand', '').lower() in ('1', 'true', 'yes')
+
+    queryset = VehicleSchedule.objects.select_related('vehicle', 'route', 'route__start_point', 'route__end_point').all()
     if vehicle_id:
         queryset = queryset.filter(vehicle_id=vehicle_id)
     if route_id:
         queryset = queryset.filter(route_id=route_id)
+    if date_str:
+        try:
+            search_date = datetime.strptime(str(date_str).strip()[:10], '%Y-%m-%d').date()
+            queryset = queryset.filter(date=search_date)
+        except ValueError:
+            pass
+    if from_place:
+        queryset = queryset.filter(route__start_point_id=from_place)
+    if to_place:
+        queryset = queryset.filter(route__end_point_id=to_place)
+
     page = int(request.query_params.get('page', 1))
     per_page = int(request.query_params.get('per_page', 10))
     start = (page - 1) * per_page
     end = start + per_page
     total = queryset.count()
-    items = queryset.order_by('-date', '-time')[start:end]
+    items = queryset.order_by('date', 'time')[start:end]
+
+    if expand and items:
+        vehicle_ids = [s.vehicle_id for s in items]
+        from django.db.models import Prefetch
+        from ..models import VehicleImage
+        vehicles_with_images = Vehicle.objects.filter(id__in=vehicle_ids).prefetch_related(
+            Prefetch('images', queryset=VehicleImage.objects.all()[:20])
+        )
+        vehicle_map = {v.id: v for v in vehicles_with_images}
+
+        def _count_seats_in_booking(seat_field):
+            if isinstance(seat_field, list):
+                return sum(1 for x in seat_field if isinstance(x, dict) and x.get('side') is not None and x.get('number') is not None)
+            if isinstance(seat_field, dict) and seat_field.get('side') is not None and seat_field.get('number') is not None:
+                return 1
+            return 0
+
+        results = []
+        for s in items:
+            v = vehicle_map.get(s.vehicle_id) or s.vehicle
+            if hasattr(v, 'images'):
+                s.vehicle._prefetched_images = list(v.images.all()[:20])
+            row = _schedule_to_response_expanded(s, request)
+            total_seats = s.vehicle.seats.count() if hasattr(s.vehicle, 'seats') else 0
+            if total_seats == 0:
+                layout = getattr(s.vehicle, 'seat_layout', None) or []
+                total_seats = sum(1 for c in layout if c == 'x')
+            seats_used = 0
+            for b in VehicleTicketBooking.objects.filter(vehicle_schedule=s).only('seat'):
+                seats_used += _count_seats_in_booking(b.seat)
+            row['available_seats'] = max(0, total_seats - seats_used)
+            row['total_seats'] = total_seats
+            results.append(row)
+    else:
+        results = [_schedule_to_response(s) for s in items]
+
     return Response({
-        'results': [_schedule_to_response(s) for s in items],
+        'results': results,
         'count': total,
         'page': page,
         'per_page': per_page,
