@@ -1,9 +1,10 @@
 """Location views: create and list."""
 from decimal import Decimal
 
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
 
 from ..models import Location, Vehicle, Trip
 
@@ -22,6 +23,7 @@ def _location_to_response(loc):
 
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def location_list_post_view(request):
     """Create a location record."""
     vehicle_id = request.POST.get('vehicle') or request.data.get('vehicle')

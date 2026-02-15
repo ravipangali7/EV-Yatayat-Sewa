@@ -127,6 +127,7 @@ class SeatBookingSerializer(serializers.ModelSerializer):
             'check_in_lat', 'check_in_lng', 'check_in_datetime', 'check_in_address',
             'check_out_lat', 'check_out_lng', 'check_out_datetime', 'check_out_address',
             'trip_distance', 'trip_duration', 'trip_amount', 'is_paid',
+            'destination_place',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']

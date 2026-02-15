@@ -409,11 +409,27 @@ def trip_current_stop_view(request):
                         'phone': vtb.phone,
                         'seat': seat_str,
                     })
+            dropoffs = []
+            if not trip.is_scheduled:
+                for sb in SeatBooking.objects.filter(
+                    trip=trip,
+                    destination_place_id=place.id,
+                    check_out_datetime__isnull=True,
+                ).select_related('vehicle_seat'):
+                    seat_label = f"{sb.vehicle_seat.side}{sb.vehicle_seat.number}"
+                    dropoffs.append({
+                        'booking_id': str(sb.id),
+                        'vehicle_seat_id': str(sb.vehicle_seat_id),
+                        'seat_label': seat_label,
+                        'name': sb.user.name if sb.user else 'Guest',
+                        'pnr': '',
+                    })
             return Response({
                 'at_stop': {
                     'place_id': str(place.id),
                     'name': place.name,
                     'pickups': pickups,
+                    'dropoffs': dropoffs,
                 },
             }, status=status.HTTP_200_OK)
 

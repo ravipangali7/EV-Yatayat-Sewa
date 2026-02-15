@@ -8,7 +8,7 @@ from datetime import datetime
 import math
 import json
 from django.db.models import F
-from ..models import Vehicle, VehicleSeat, SeatBooking, Trip
+from ..models import Vehicle, VehicleSeat, SeatBooking, Trip, Place
 from core.models import User, SuperSetting, Wallet, Transaction
 from ..serializers import SeatBookingSerializer
 
@@ -95,17 +95,28 @@ def seat_booking_list_get_view(request):
 
 
 def _create_seat_booking(request):
-    """Helper function to create a seat booking - extracted to avoid double @api_view wrapping"""
+    """Helper function to create a seat booking - extracted to avoid double @api_view wrapping.
+    For driver guest check-in on non-scheduled trip: pass trip, check_out_*, trip_distance,
+    trip_amount, destination_place_id; trip_duration and check_out_datetime stay null until checkout.
+    """
     # Extract data from request.POST or request.data
     user_id = request.POST.get('user') or request.data.get('user') or None
     is_guest = request.POST.get('is_guest') or request.data.get('is_guest', 'false')
     vehicle_id = request.POST.get('vehicle') or request.data.get('vehicle')
     vehicle_seat_id = request.POST.get('vehicle_seat') or request.data.get('vehicle_seat')
+    trip_id = request.POST.get('trip') or request.data.get('trip') or None
     check_in_lat = request.POST.get('check_in_lat') or request.data.get('check_in_lat')
     check_in_lng = request.POST.get('check_in_lng') or request.data.get('check_in_lng')
     check_in_datetime = request.POST.get('check_in_datetime') or request.data.get('check_in_datetime')
     check_in_address = request.POST.get('check_in_address') or request.data.get('check_in_address', '')
-    
+    check_out_lat = request.POST.get('check_out_lat') or request.data.get('check_out_lat')
+    check_out_lng = request.POST.get('check_out_lng') or request.data.get('check_out_lng')
+    check_out_address = request.POST.get('check_out_address') or request.data.get('check_out_address') or ''
+    trip_distance = request.POST.get('trip_distance') or request.data.get('trip_distance')
+    trip_amount = request.POST.get('trip_amount') or request.data.get('trip_amount')
+    destination_place_id = request.POST.get('destination_place') or request.data.get('destination_place') or None
+    is_paid_val = request.POST.get('is_paid') or request.data.get('is_paid', 'false')
+
     # Validate required fields
     if not vehicle_id:
         return Response({'error': 'Vehicle is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -115,31 +126,32 @@ def _create_seat_booking(request):
         return Response({'error': 'Check-in location (lat/lng) is required'}, status=status.HTTP_400_BAD_REQUEST)
     if not check_in_datetime:
         return Response({'error': 'Check-in datetime is required'}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     # Convert boolean
     is_guest = is_guest.lower() == 'true' if isinstance(is_guest, str) else bool(is_guest)
-    
+    is_paid_val = is_paid_val.lower() == 'true' if isinstance(is_paid_val, str) else bool(is_paid_val)
+
     # Validate user/guest logic
     if not is_guest and not user_id:
         return Response({'error': 'User is required when is_guest is false'}, status=status.HTTP_400_BAD_REQUEST)
     if is_guest and user_id:
         return Response({'error': 'User should not be provided when is_guest is true'}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     # Check if vehicle and seat exist
     try:
         vehicle = Vehicle.objects.get(pk=vehicle_id)
     except Vehicle.DoesNotExist:
         return Response({'error': 'Vehicle not found'}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     try:
         vehicle_seat = VehicleSeat.objects.get(pk=vehicle_seat_id, vehicle=vehicle)
     except VehicleSeat.DoesNotExist:
         return Response({'error': 'Vehicle seat not found'}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     # Check if seat is available
     if vehicle_seat.status != 'available':
         return Response({'error': 'Seat is not available'}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     # Get user if provided
     user = None
     if user_id:
@@ -147,37 +159,75 @@ def _create_seat_booking(request):
             user = User.objects.get(pk=user_id)
         except User.DoesNotExist:
             return Response({'error': 'User not found'}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     # Parse datetime
     try:
         if isinstance(check_in_datetime, str):
             check_in_datetime = datetime.fromisoformat(check_in_datetime.replace('Z', '+00:00'))
         else:
             check_in_datetime = datetime.fromisoformat(str(check_in_datetime).replace('Z', '+00:00'))
-    except:
+    except Exception:
         return Response({'error': 'Invalid check_in_datetime format'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    # Link to active trip if vehicle has one
-    active_trip = Trip.objects.filter(vehicle=vehicle, end_time__isnull=True).order_by('-start_time').first()
-    
-    # Create booking
-    booking = SeatBooking.objects.create(
-        user=user,
-        is_guest=is_guest,
-        vehicle=vehicle,
-        vehicle_seat=vehicle_seat,
-        trip=active_trip,
-        check_in_lat=Decimal(str(check_in_lat)),
-        check_in_lng=Decimal(str(check_in_lng)),
-        check_in_datetime=check_in_datetime,
-        check_in_address=check_in_address,
-    )
-    
+
+    # Resolve trip: explicit trip_id or active trip for vehicle
+    active_trip = None
+    if trip_id:
+        try:
+            t = Trip.objects.get(pk=trip_id, vehicle=vehicle)
+            if t.end_time is None:
+                active_trip = t
+            else:
+                return Response({'error': 'Trip is not active'}, status=status.HTTP_400_BAD_REQUEST)
+        except Trip.DoesNotExist:
+            return Response({'error': 'Trip not found'}, status=status.HTTP_404_NOT_FOUND)
+    else:
+        active_trip = Trip.objects.filter(vehicle=vehicle, end_time__isnull=True).order_by('-start_time').first()
+
+    # Driver guest check-in with destination (non-scheduled): require check_out_*, trip_distance, trip_amount
+    has_destination = check_out_lat and check_out_lng and trip_distance is not None and trip_amount is not None
+    if has_destination:
+        if not active_trip:
+            return Response({'error': 'Active trip is required for check-in with destination'}, status=status.HTTP_400_BAD_REQUEST)
+        if getattr(active_trip, 'is_scheduled', False):
+            return Response({'error': 'Destination check-in is for non-scheduled trips only'}, status=status.HTTP_400_BAD_REQUEST)
+        if not is_guest:
+            return Response({'error': 'Driver check-in with destination must be is_guest true'}, status=status.HTTP_400_BAD_REQUEST)
+
+    destination_place = None
+    if destination_place_id:
+        try:
+            destination_place = Place.objects.get(pk=destination_place_id)
+        except Place.DoesNotExist:
+            return Response({'error': 'Destination place not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    booking_kwargs = {
+        'user': user,
+        'is_guest': is_guest,
+        'vehicle': vehicle,
+        'vehicle_seat': vehicle_seat,
+        'trip': active_trip,
+        'check_in_lat': Decimal(str(check_in_lat)),
+        'check_in_lng': Decimal(str(check_in_lng)),
+        'check_in_datetime': check_in_datetime,
+        'check_in_address': check_in_address or '',
+        'destination_place': destination_place,
+    }
+    if check_out_lat and check_out_lng:
+        booking_kwargs['check_out_lat'] = Decimal(str(check_out_lat))
+        booking_kwargs['check_out_lng'] = Decimal(str(check_out_lng))
+        booking_kwargs['check_out_address'] = check_out_address or ''
+    if trip_distance is not None:
+        booking_kwargs['trip_distance'] = Decimal(str(trip_distance))
+    if trip_amount is not None:
+        booking_kwargs['trip_amount'] = Decimal(str(trip_amount))
+    booking_kwargs['is_paid'] = is_paid_val
+
+    booking = SeatBooking.objects.create(**booking_kwargs)
+
     # Update seat status to booked
     vehicle_seat.status = 'booked'
     vehicle_seat.save()
-    
-    # Serialize and return
+
     serializer = SeatBookingSerializer(booking)
     return Response(serializer.data, status=status.HTTP_201_CREATED)
 
@@ -328,32 +378,42 @@ def seat_booking_switch_view(request):
 
 @api_view(['POST'])
 def seat_booking_checkout_view(request):
-    """Checkout with distance/duration/amount calculation"""
+    """Checkout with distance/duration/amount calculation.
+    Optional place_id: when provided (e.g. current stop), validate booking.destination_place_id matches.
+    """
     vehicle_seat_id = request.POST.get('vehicle_seat_id') or request.data.get('vehicle_seat_id')
     check_out_lat = request.POST.get('check_out_lat') or request.data.get('check_out_lat')
     check_out_lng = request.POST.get('check_out_lng') or request.data.get('check_out_lng')
     check_out_address = request.POST.get('check_out_address') or request.data.get('check_out_address', '')
     is_paid = request.POST.get('is_paid') or request.data.get('is_paid', 'false')
-    
+    place_id = request.POST.get('place_id') or request.data.get('place_id')
+
     if not vehicle_seat_id:
         return Response({'error': 'Vehicle seat is required'}, status=status.HTTP_400_BAD_REQUEST)
     if not check_out_lat or not check_out_lng:
         return Response({'error': 'Check-out location (lat/lng) is required'}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     # Get the seat
     try:
         vehicle_seat = VehicleSeat.objects.get(pk=vehicle_seat_id)
     except VehicleSeat.DoesNotExist:
         return Response({'error': 'Vehicle seat not found'}, status=status.HTTP_404_NOT_FOUND)
-    
+
     # Get the latest booking for this seat that hasn't been checked out
     try:
-        booking = SeatBooking.objects.select_related('trip', 'trip__driver').filter(
+        booking = SeatBooking.objects.select_related('trip', 'trip__driver', 'destination_place').filter(
             vehicle_seat=vehicle_seat,
             check_out_datetime__isnull=True
         ).latest('created_at')
     except SeatBooking.DoesNotExist:
         return Response({'error': 'No active booking found for this seat'}, status=status.HTTP_404_NOT_FOUND)
+
+    if place_id and booking.destination_place_id is not None:
+        if str(booking.destination_place_id) != str(place_id):
+            return Response(
+                {'error': 'This passenger is not scheduled to get off at this stop. Wrong stop.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
     
     # Calculate distance
     distance = haversine_distance(
