@@ -29,7 +29,9 @@ def super_setting_list_get_view(request):
         results.append({
             'id': str(setting.id),
             'per_km_charge': str(setting.per_km_charge),
-            'gps_threshold': str(setting.gps_threshold),
+            'gps_threshold_second': str(setting.gps_threshold_second),
+            'point_cover_radius': str(setting.point_cover_radius) if setting.point_cover_radius is not None else None,
+            'minute_coverage_schedule': setting.minute_coverage_schedule,
             'seat_layout': getattr(setting, 'seat_layout', []) or [],
             'created_at': setting.created_at.isoformat(),
             'updated_at': setting.updated_at.isoformat(),
@@ -59,12 +61,22 @@ def super_setting_list_post_view(request):
     except (ValueError, TypeError):
         return Response({'error': 'Invalid per_km_charge value'}, status=status.HTTP_400_BAD_REQUEST)
     
-    # Optional gps_threshold (default 5)
-    gps_threshold = request.POST.get('gps_threshold') or request.data.get('gps_threshold', '5')
+    # Optional gps_threshold_second (default 5)
+    gps_threshold_second = request.POST.get('gps_threshold_second') or request.data.get('gps_threshold_second', '5')
     try:
-        gps_threshold = Decimal(str(gps_threshold))
+        gps_threshold_second = Decimal(str(gps_threshold_second))
     except (ValueError, TypeError):
-        gps_threshold = Decimal('5')
+        gps_threshold_second = Decimal('5')
+    point_cover_radius = request.POST.get('point_cover_radius') or request.data.get('point_cover_radius')
+    minute_coverage_schedule = request.POST.get('minute_coverage_schedule') or request.data.get('minute_coverage_schedule')
+    try:
+        point_cover_radius = Decimal(str(point_cover_radius)) if point_cover_radius is not None else None
+    except (ValueError, TypeError):
+        point_cover_radius = None
+    try:
+        minute_coverage_schedule = int(minute_coverage_schedule) if minute_coverage_schedule is not None else None
+    except (ValueError, TypeError):
+        minute_coverage_schedule = None
     
     seat_layout = request.POST.get('seat_layout') or request.data.get('seat_layout')
     if seat_layout is not None and isinstance(seat_layout, str):
@@ -79,7 +91,9 @@ def super_setting_list_post_view(request):
     # Create setting directly without serializer
     setting = SuperSetting.objects.create(
         per_km_charge=per_km_charge,
-        gps_threshold=gps_threshold,
+        gps_threshold_second=gps_threshold_second,
+        point_cover_radius=point_cover_radius,
+        minute_coverage_schedule=minute_coverage_schedule,
         seat_layout=seat_layout,
     )
     
@@ -87,7 +101,9 @@ def super_setting_list_post_view(request):
     return Response({
         'id': str(setting.id),
         'per_km_charge': str(setting.per_km_charge),
-        'gps_threshold': str(setting.gps_threshold),
+        'gps_threshold_second': str(setting.gps_threshold_second),
+        'point_cover_radius': str(setting.point_cover_radius) if setting.point_cover_radius is not None else None,
+        'minute_coverage_schedule': setting.minute_coverage_schedule,
         'seat_layout': setting.seat_layout,
         'created_at': setting.created_at.isoformat(),
         'updated_at': setting.updated_at.isoformat(),
@@ -106,7 +122,9 @@ def super_setting_detail_get_view(request, pk):
     return Response({
         'id': str(setting.id),
         'per_km_charge': str(setting.per_km_charge),
-        'gps_threshold': str(setting.gps_threshold),
+        'gps_threshold_second': str(setting.gps_threshold_second),
+        'point_cover_radius': str(setting.point_cover_radius) if setting.point_cover_radius is not None else None,
+        'minute_coverage_schedule': setting.minute_coverage_schedule,
         'seat_layout': getattr(setting, 'seat_layout', []) or [],
         'created_at': setting.created_at.isoformat(),
         'updated_at': setting.updated_at.isoformat(),
@@ -129,12 +147,24 @@ def super_setting_detail_post_view(request, pk):
         except (ValueError, TypeError):
             return Response({'error': 'Invalid per_km_charge value'}, status=status.HTTP_400_BAD_REQUEST)
     
-    if 'gps_threshold' in request.POST or 'gps_threshold' in request.data:
-        gps_threshold = request.POST.get('gps_threshold') or request.data.get('gps_threshold')
+    if 'gps_threshold_second' in request.POST or 'gps_threshold_second' in request.data:
+        gps_threshold_second = request.POST.get('gps_threshold_second') or request.data.get('gps_threshold_second')
         try:
-            setting.gps_threshold = Decimal(str(gps_threshold))
+            setting.gps_threshold_second = Decimal(str(gps_threshold_second))
         except (ValueError, TypeError):
-            return Response({'error': 'Invalid gps_threshold value'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'Invalid gps_threshold_second value'}, status=status.HTTP_400_BAD_REQUEST)
+    if 'point_cover_radius' in request.POST or 'point_cover_radius' in request.data:
+        point_cover_radius = request.POST.get('point_cover_radius') or request.data.get('point_cover_radius')
+        try:
+            setting.point_cover_radius = Decimal(str(point_cover_radius)) if point_cover_radius is not None else None
+        except (ValueError, TypeError):
+            return Response({'error': 'Invalid point_cover_radius value'}, status=status.HTTP_400_BAD_REQUEST)
+    if 'minute_coverage_schedule' in request.POST or 'minute_coverage_schedule' in request.data:
+        minute_coverage_schedule = request.POST.get('minute_coverage_schedule') or request.data.get('minute_coverage_schedule')
+        try:
+            setting.minute_coverage_schedule = int(minute_coverage_schedule) if minute_coverage_schedule is not None else None
+        except (ValueError, TypeError):
+            return Response({'error': 'Invalid minute_coverage_schedule value'}, status=status.HTTP_400_BAD_REQUEST)
     
     if 'seat_layout' in request.POST or 'seat_layout' in request.data:
         seat_layout = request.POST.get('seat_layout') or request.data.get('seat_layout')
@@ -154,7 +184,9 @@ def super_setting_detail_post_view(request, pk):
     return Response({
         'id': str(setting.id),
         'per_km_charge': str(setting.per_km_charge),
-        'gps_threshold': str(setting.gps_threshold),
+        'gps_threshold_second': str(setting.gps_threshold_second),
+        'point_cover_radius': str(setting.point_cover_radius) if setting.point_cover_radius is not None else None,
+        'minute_coverage_schedule': setting.minute_coverage_schedule,
         'seat_layout': getattr(setting, 'seat_layout', []) or [],
         'created_at': setting.created_at.isoformat(),
         'updated_at': setting.updated_at.isoformat(),

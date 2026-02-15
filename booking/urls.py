@@ -72,6 +72,7 @@ urlpatterns = [
     path('trips/<int:pk>/', trip_views.trip_detail_get_view, name='trip-detail-get'),
     path('trips/<int:pk>/edit/', trip_views.trip_detail_post_view, name='trip-detail-post'),
     path('trips/<int:pk>/end/', trip_views.trip_end_view, name='trip-end'),
+    path('trips/current-stop/', trip_views.trip_current_stop_view, name='trip-current-stop'),
     path('trips/<int:pk>/delete/', trip_views.trip_delete_get_view, name='trip-delete'),
     # Location endpoints
     path('locations/', location_views.location_list_get_view, name='location-list-get'),

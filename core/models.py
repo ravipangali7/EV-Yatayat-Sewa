@@ -62,7 +62,9 @@ class SuperSetting(models.Model):
     """Super settings for the application"""
     id = models.BigAutoField(primary_key=True)
     per_km_charge = models.DecimalField(max_digits=10, decimal_places=2)
-    gps_threshold = models.DecimalField(max_digits=10, decimal_places=2, default=5)  # km radius for destination check
+    gps_threshold_second = models.DecimalField(max_digits=10, decimal_places=2, default=5)  # seconds between GPS sends
+    point_cover_radius = models.DecimalField(max_digits=10, decimal_places=4, default=0.5, null=True, blank=True)  # km radius for at stop/start
+    minute_coverage_schedule = models.IntegerField(default=60, null=True, blank=True)  # minutes before/after schedule time for scheduled start
     seat_layout = models.JSONField(default=list, blank=True)  # e.g. ["x","-","-","y",":", ...]
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
     updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')

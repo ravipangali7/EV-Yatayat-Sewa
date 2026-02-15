@@ -34,8 +34,8 @@ class UserAdmin(BaseUserAdmin):
 @admin.register(SuperSetting)
 class SuperSettingAdmin(admin.ModelAdmin):
     """SuperSetting admin"""
-    list_display = ('id', 'per_km_charge', 'gps_threshold', 'created_at', 'updated_at')
-    list_editable = ('per_km_charge', 'gps_threshold')
+    list_display = ('id', 'per_km_charge', 'gps_threshold_second', 'point_cover_radius', 'minute_coverage_schedule', 'created_at', 'updated_at')
+    list_editable = ('per_km_charge', 'gps_threshold_second', 'point_cover_radius', 'minute_coverage_schedule')
     readonly_fields = ('created_at', 'updated_at')
     list_filter = ('created_at', 'updated_at')
 

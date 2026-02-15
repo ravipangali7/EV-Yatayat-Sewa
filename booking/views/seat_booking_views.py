@@ -348,7 +348,7 @@ def seat_booking_checkout_view(request):
     
     # Get the latest booking for this seat that hasn't been checked out
     try:
-        booking = SeatBooking.objects.filter(
+        booking = SeatBooking.objects.select_related('trip', 'trip__driver').filter(
             vehicle_seat=vehicle_seat,
             check_out_datetime__isnull=True
         ).latest('created_at')
@@ -369,16 +369,18 @@ def seat_booking_checkout_view(request):
         check_out_time = datetime.now(booking.check_in_datetime.tzinfo)
     duration = int((check_out_time - booking.check_in_datetime).total_seconds())
     
-    # Get per_km_charge from SuperSetting
-    try:
-        super_setting = SuperSetting.objects.latest('created_at')
-        per_km_charge = super_setting.per_km_charge
-    except SuperSetting.DoesNotExist:
-        return Response({'error': 'Super setting not found. Please configure per_km_charge.'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    # Calculate trip amount
-    trip_amount = Decimal(str(distance)) * per_km_charge
-    trip_amount = Decimal(str(round(trip_amount, 2)))
+    # Trip amount: for scheduled trips use existing (pre-set from ticket); else calculate from distance
+    is_scheduled_trip = booking.trip_id and getattr(booking.trip, 'is_scheduled', False)
+    if is_scheduled_trip and booking.trip_amount is not None and booking.trip_amount > 0:
+        trip_amount = booking.trip_amount
+    else:
+        try:
+            super_setting = SuperSetting.objects.latest('created_at')
+            per_km_charge = super_setting.per_km_charge
+        except SuperSetting.DoesNotExist:
+            return Response({'error': 'Super setting not found. Please configure per_km_charge.'}, status=status.HTTP_400_BAD_REQUEST)
+        trip_amount = Decimal(str(distance)) * per_km_charge
+        trip_amount = Decimal(str(round(trip_amount, 2)))
     
     # Update booking
     booking.check_out_lat = Decimal(str(check_out_lat))
@@ -412,6 +414,25 @@ def seat_booking_checkout_view(request):
             status='success',
             remarks=f'Trip amount - Seat booking #{booking.id}',
         )
+    
+    # For normal (non-scheduled) trip: add trip_amount to driver's to_receive. Scheduled trips already paid via ticket.
+    if booking.trip_id and booking.trip_amount and booking.trip_amount > 0 and booking.trip and not getattr(booking.trip, 'is_scheduled', False):
+        driver = booking.trip.driver
+        if driver:
+            driver_wallet, _ = Wallet.objects.get_or_create(user=driver, defaults={'balance': 0, 'to_pay': 0, 'to_receive': 0})
+            balance_before = driver_wallet.balance
+            Wallet.objects.filter(pk=driver_wallet.pk).update(to_receive=F('to_receive') + booking.trip_amount)
+            driver_wallet.refresh_from_db()
+            Transaction.objects.create(
+                wallet=driver_wallet,
+                user=driver,
+                amount=booking.trip_amount,
+                balance_before=balance_before,
+                balance_after=driver_wallet.balance,
+                type='add',
+                status='success',
+                remarks=f'Trip amount (driver) - Seat booking #{booking.id}',
+            )
     
     serializer = SeatBookingSerializer(booking)
     return Response(serializer.data)

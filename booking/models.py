@@ -233,6 +233,8 @@ class VehicleTicketBooking(models.Model):
     name = models.CharField(max_length=255)
     phone = models.CharField(max_length=100)
     vehicle_schedule = models.ForeignKey(VehicleSchedule, on_delete=models.CASCADE, related_name='ticket_bookings')
+    pickup_point = models.ForeignKey(Place, on_delete=models.SET_NULL, null=True, blank=True, related_name='ticket_bookings_pickup')
+    destination_point = models.ForeignKey(Place, on_delete=models.SET_NULL, null=True, blank=True, related_name='ticket_bookings_destination')
     ticket_id = models.CharField(max_length=100, unique=True, db_index=True)
     seat = models.JSONField(default=dict)  # list e.g. [{"side": "A", "number": 1}, ...] or legacy single dict
     price = models.DecimalField(max_digits=10, decimal_places=2)

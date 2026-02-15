@@ -1,12 +1,28 @@
 """VehicleSchedule CRUD views."""
 from decimal import Decimal
 from datetime import datetime
-
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 
-from ..models import VehicleSchedule, Vehicle, Route, Place, VehicleTicketBooking
+from ..models import VehicleSchedule, Vehicle, Route, Place, VehicleTicketBooking, RouteStopPoint
+
+
+def _route_place_order(route):
+    """Return dict place_id -> order (0=start, 1..n=stops, n+1=end)."""
+    order_map = {route.start_point_id: 0}
+    for i, sp in enumerate(route.stop_points.all().order_by('order')):
+        order_map[sp.place_id] = i + 1
+    order_map[route.end_point_id] = len(order_map)  # end is last
+    return order_map
+
+
+def _route_contains_place_before(route, from_place_id, to_place_id):
+    """True if both places are on route and from comes before to."""
+    order_map = _route_place_order(route)
+    if from_place_id not in order_map or to_place_id not in order_map:
+        return False
+    return order_map[from_place_id] < order_map[to_place_id]
 
 
 def _schedule_to_response(s):
@@ -76,10 +92,19 @@ def _schedule_to_response_expanded(s, request):
 
 @api_view(['GET'])
 def vehicle_schedule_start_places_view(request):
-    """Distinct places that are start_point of any route which has at least one VehicleSchedule."""
-    places = Place.objects.filter(
-        routes_starting_here__vehicle_schedules__isnull=False
-    ).distinct().order_by('name')
+    """All places that appear on any vehicle_schedule route: start + stop_points + end, distinct, by name."""
+    # Routes that have at least one VehicleSchedule
+    route_ids = VehicleSchedule.objects.values_list('route_id', flat=True).distinct()
+    routes = Route.objects.filter(id__in=route_ids).prefetch_related(
+        'start_point', 'end_point', 'stop_points__place'
+    )
+    place_ids = set()
+    for route in routes:
+        place_ids.add(route.start_point_id)
+        place_ids.add(route.end_point_id)
+        for sp in route.stop_points.all():
+            place_ids.add(sp.place_id)
+    places = Place.objects.filter(id__in=place_ids).order_by('name')
     return Response([
         {'id': str(p.id), 'name': p.name, 'code': p.code}
         for p in places
@@ -88,18 +113,66 @@ def vehicle_schedule_start_places_view(request):
 
 @api_view(['GET'])
 def vehicle_schedule_end_places_view(request):
-    """Distinct places that are end_point of routes where start_point=from and route has VehicleSchedule."""
+    """Places that are 'after' from_place on some route (stops + end), so 'to' can be any downstream place."""
     from_place_id = request.query_params.get('from')
     if not from_place_id:
         return Response({'error': 'from (place id) is required'}, status=status.HTTP_400_BAD_REQUEST)
-    places = Place.objects.filter(
-        routes_ending_here__vehicle_schedules__isnull=False,
-        routes_ending_here__start_point_id=from_place_id
-    ).distinct().order_by('name')
+    route_ids = VehicleSchedule.objects.values_list('route_id', flat=True).distinct()
+    routes = Route.objects.filter(id__in=route_ids).prefetch_related(
+        'start_point', 'end_point', 'stop_points__place'
+    )
+    place_ids = set()
+    for route in routes:
+        order_map = _route_place_order(route)
+        if int(from_place_id) not in order_map:
+            continue
+        from_order = order_map[int(from_place_id)]
+        for pid, o in order_map.items():
+            if o > from_order:
+                place_ids.add(pid)
+    places = Place.objects.filter(id__in=place_ids).order_by('name')
     return Response([
         {'id': str(p.id), 'name': p.name, 'code': p.code}
         for p in places
     ])
+
+
+def _seat_to_list(seat):
+    if isinstance(seat, list):
+        return [x for x in seat if isinstance(x, dict) and x.get('side') is not None and x.get('number') is not None]
+    if isinstance(seat, dict) and seat.get('side') is not None and seat.get('number') is not None:
+        return [seat]
+    return []
+
+
+def _segment_overlap(a_start, a_end, b_start, b_end):
+    """True if segment [a_start, a_end] overlaps [b_start, b_end] (order indices)."""
+    return a_start < b_end and b_start < a_end
+
+
+def _booked_seats_for_segment(schedule, from_order, to_order, order_map):
+    """Set of (side, number) that are booked for a segment overlapping [from_order, to_order]."""
+    booked = set()
+    for b in VehicleTicketBooking.objects.filter(vehicle_schedule=schedule).select_related('pickup_point', 'destination_point'):
+        seat_list = _seat_to_list(b.seat)
+        if not seat_list:
+            continue
+        if b.pickup_point_id and b.destination_point_id and b.pickup_point_id in order_map and b.destination_point_id in order_map:
+            b_start = order_map[b.pickup_point_id]
+            b_end = order_map[b.destination_point_id]
+        else:
+            b_start = 0
+            b_end = max(order_map.values()) + 1
+        if not _segment_overlap(from_order, to_order, b_start, b_end):
+            continue
+        for s in seat_list:
+            side = str(s.get('side', ''))
+            try:
+                num = int(s.get('number', 0))
+            except (TypeError, ValueError):
+                continue
+            booked.add((side, num))
+    return booked
 
 
 @api_view(['GET'])
@@ -111,7 +184,7 @@ def vehicle_schedule_list_get_view(request):
     to_place = request.query_params.get('to_place')
     expand = request.query_params.get('expand', '').lower() in ('1', 'true', 'yes')
 
-    queryset = VehicleSchedule.objects.select_related('vehicle', 'route', 'route__start_point', 'route__end_point').all()
+    queryset = VehicleSchedule.objects.select_related('vehicle', 'route', 'route__start_point', 'route__end_point').prefetch_related('route__stop_points__place')
     if vehicle_id:
         queryset = queryset.filter(vehicle_id=vehicle_id)
     if route_id:
@@ -122,9 +195,19 @@ def vehicle_schedule_list_get_view(request):
             queryset = queryset.filter(date=search_date)
         except ValueError:
             pass
-    if from_place:
+    # Segment search: both from_place and to_place => filter by route containing both in order
+    if from_place and to_place:
+        from_place_id = int(from_place)
+        to_place_id = int(to_place)
+        # Filter schedules whose route has from_place before to_place
+        valid_schedule_ids = []
+        for s in queryset:
+            if _route_contains_place_before(s.route, from_place_id, to_place_id):
+                valid_schedule_ids.append(s.id)
+        queryset = queryset.filter(id__in=valid_schedule_ids)
+    elif from_place:
         queryset = queryset.filter(route__start_point_id=from_place)
-    if to_place:
+    elif to_place:
         queryset = queryset.filter(route__end_point_id=to_place)
 
     page = int(request.query_params.get('page', 1))
@@ -132,7 +215,7 @@ def vehicle_schedule_list_get_view(request):
     start = (page - 1) * per_page
     end = start + per_page
     total = queryset.count()
-    items = queryset.order_by('date', 'time')[start:end]
+    items = list(queryset.order_by('date', 'time')[start:end])
 
     if expand and items:
         vehicle_ids = [s.vehicle_id for s in items]
@@ -160,9 +243,16 @@ def vehicle_schedule_list_get_view(request):
             if total_seats == 0:
                 layout = getattr(s.vehicle, 'seat_layout', None) or []
                 total_seats = sum(1 for c in layout if c == 'x')
-            seats_used = 0
-            for b in VehicleTicketBooking.objects.filter(vehicle_schedule=s).only('seat'):
-                seats_used += _count_seats_in_booking(b.seat)
+            if from_place and to_place:
+                order_map = _route_place_order(s.route)
+                from_order = order_map.get(int(from_place), -1)
+                to_order = order_map.get(int(to_place), -1)
+                booked_for_segment = _booked_seats_for_segment(s, from_order, to_order, order_map)
+                seats_used = len(booked_for_segment)
+            else:
+                seats_used = 0
+                for b in VehicleTicketBooking.objects.filter(vehicle_schedule=s).only('seat'):
+                    seats_used += _count_seats_in_booking(b.seat)
             row['available_seats'] = max(0, total_seats - seats_used)
             row['total_seats'] = total_seats
             results.append(row)

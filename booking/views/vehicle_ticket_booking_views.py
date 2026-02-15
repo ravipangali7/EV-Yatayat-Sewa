@@ -10,7 +10,7 @@ from rest_framework import status
 from django.http import HttpResponse
 from django.db import transaction as db_transaction
 
-from ..models import VehicleTicketBooking, VehicleSchedule, VehicleSeat
+from ..models import VehicleTicketBooking, VehicleSchedule, VehicleSeat, Place
 from core.models import User, Wallet
 from core.services.wallet_transaction import create_wallet_transaction
 
@@ -36,6 +36,8 @@ def _ticket_booking_to_response(b, include_schedule_details=False):
         'name': b.name,
         'phone': b.phone,
         'vehicle_schedule': str(b.vehicle_schedule.id),
+        'pickup_point': str(b.pickup_point.id) if b.pickup_point_id else None,
+        'destination_point': str(b.destination_point.id) if b.destination_point_id else None,
         'ticket_id': b.ticket_id,
         'seat': seat,
         'price': str(b.price),
@@ -64,7 +66,7 @@ def vehicle_ticket_booking_list_get_view(request):
     vs_id = request.query_params.get('vehicle_schedule')
     user_id = request.query_params.get('user')
     booked_by_id = request.query_params.get('booked_by')
-    queryset = VehicleTicketBooking.objects.select_related('user', 'booked_by', 'vehicle_schedule').all()
+    queryset = VehicleTicketBooking.objects.select_related('user', 'booked_by', 'vehicle_schedule', 'pickup_point', 'destination_point').all()
     if vs_id:
         queryset = queryset.filter(vehicle_schedule_id=vs_id)
     if user_id:
@@ -93,6 +95,8 @@ def vehicle_ticket_booking_list_post_view(request):
     name = request.POST.get('name') or request.data.get('name')
     phone = request.POST.get('phone') or request.data.get('phone')
     vehicle_schedule_id = request.POST.get('vehicle_schedule') or request.data.get('vehicle_schedule')
+    pickup_point_id = request.POST.get('pickup_point') or request.data.get('pickup_point')
+    destination_point_id = request.POST.get('destination_point') or request.data.get('destination_point')
     ticket_id = request.POST.get('ticket_id') or request.data.get('ticket_id')
     seat = request.POST.get('seat') or request.data.get('seat')
     seats = request.POST.get('seats') or request.data.get('seats')
@@ -107,9 +111,39 @@ def vehicle_ticket_booking_list_post_view(request):
         return Response({'error': 'user required when not guest'}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        vs = VehicleSchedule.objects.select_related('vehicle').get(pk=vehicle_schedule_id)
+        vs = VehicleSchedule.objects.select_related('vehicle', 'route').prefetch_related('route__stop_points__place').get(pk=vehicle_schedule_id)
     except VehicleSchedule.DoesNotExist:
         return Response({'error': 'Vehicle schedule not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Validate pickup_point and destination_point if provided (must be on route, pickup before destination)
+    pickup_point = None
+    destination_point = None
+    if pickup_point_id or destination_point_id:
+        route = vs.route
+        # Build place_id -> order: start=0, stop_points by order 1..n, end=n+1
+        place_order = {route.start_point_id: 0}
+        stops = list(route.stop_points.all().order_by('order'))
+        for i, sp in enumerate(stops):
+            place_order[sp.place_id] = i + 1
+        place_order[route.end_point_id] = len(stops) + 1
+        if pickup_point_id:
+            try:
+                pickup_point = Place.objects.get(pk=pickup_point_id)
+            except Place.DoesNotExist:
+                return Response({'error': 'pickup_point not found'}, status=status.HTTP_400_BAD_REQUEST)
+            if pickup_point.id not in place_order:
+                return Response({'error': 'pickup_point is not on this schedule route'}, status=status.HTTP_400_BAD_REQUEST)
+        if destination_point_id:
+            try:
+                destination_point = Place.objects.get(pk=destination_point_id)
+            except Place.DoesNotExist:
+                return Response({'error': 'destination_point not found'}, status=status.HTTP_400_BAD_REQUEST)
+            if destination_point.id not in place_order:
+                return Response({'error': 'destination_point is not on this schedule route'}, status=status.HTTP_400_BAD_REQUEST)
+        if pickup_point and destination_point and place_order[pickup_point.id] >= place_order[destination_point.id]:
+            return Response({'error': 'pickup_point must be before destination_point on the route'}, status=status.HTTP_400_BAD_REQUEST)
+        if (pickup_point_id and not destination_point_id) or (destination_point_id and not pickup_point_id):
+            return Response({'error': 'both pickup_point and destination_point are required when using segment booking'}, status=status.HTTP_400_BAD_REQUEST)
 
     # Normalize seats: accept seats (list) or seat (single dict)
     seats_list = seats if seats is not None else seat
@@ -137,14 +171,34 @@ def vehicle_ticket_booking_list_post_view(request):
         if (side, number) not in vehicle_seat_keys:
             return Response({'error': f'Seat {side}{number} does not exist on this vehicle'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Already booked seats for this schedule
+    # Already booked seats: by segment overlap when pickup/destination provided, else whole schedule
+    route = vs.route
+    place_order = {route.start_point_id: 0}
+    stops = list(route.stop_points.all().order_by('order'))
+    for i, sp in enumerate(stops):
+        place_order[sp.place_id] = i + 1
+    place_order[route.end_point_id] = len(stops) + 1
+    from_order = place_order.get(pickup_point.id) if pickup_point else 0
+    to_order = place_order.get(destination_point.id) if destination_point else (max(place_order.values()) + 1)
+
     booked = set()
-    for existing in VehicleTicketBooking.objects.filter(vehicle_schedule=vs).only('seat'):
-        for s in _seat_to_list(existing.seat):
-            booked.add((str(s.get('side')), int(s.get('number', 0))))
+    for existing in VehicleTicketBooking.objects.filter(vehicle_schedule=vs).select_related('pickup_point', 'destination_point').only('seat', 'pickup_point_id', 'destination_point_id'):
+        seat_list = _seat_to_list(existing.seat)
+        if not seat_list:
+            continue
+        if existing.pickup_point_id and existing.destination_point_id and existing.pickup_point_id in place_order and existing.destination_point_id in place_order:
+            b_start = place_order[existing.pickup_point_id]
+            b_end = place_order[existing.destination_point_id]
+        else:
+            b_start = 0
+            b_end = max(place_order.values()) + 1
+        # overlap: [from_order, to_order] vs [b_start, b_end]
+        if not (to_order <= b_start or b_end <= from_order):
+            for s in seat_list:
+                booked.add((str(s.get('side')), int(s.get('number', 0))))
     for s in seats_list:
         if (str(s.get('side')), int(s.get('number', 0))) in booked:
-            return Response({'error': f"Seat {s.get('side')}{s.get('number')} is already booked for this schedule"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': f"Seat {s.get('side')}{s.get('number')} is already booked for this segment"}, status=status.HTTP_400_BAD_REQUEST)
 
     # Generate ticket_id if not provided
     if not ticket_id or not str(ticket_id).strip():
@@ -178,6 +232,8 @@ def vehicle_ticket_booking_list_post_view(request):
         name=name,
         phone=phone,
         vehicle_schedule=vs,
+        pickup_point=pickup_point,
+        destination_point=destination_point,
         ticket_id=ticket_id,
         seat=seats_list,
         price=total_price,
@@ -249,7 +305,7 @@ def vehicle_ticket_booking_detail_get_view(request, pk):
         b = VehicleTicketBooking.objects.select_related(
             'user', 'booked_by', 'vehicle_schedule', 'vehicle_schedule__vehicle',
             'vehicle_schedule__route', 'vehicle_schedule__route__start_point',
-            'vehicle_schedule__route__end_point'
+            'vehicle_schedule__route__end_point', 'pickup_point', 'destination_point'
         ).get(pk=pk)
     except VehicleTicketBooking.DoesNotExist:
         return Response({'error': 'Vehicle ticket booking not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -288,7 +344,8 @@ def vehicle_ticket_booking_ticket_pdf_view(request, pk):
     try:
         b = VehicleTicketBooking.objects.select_related(
             'vehicle_schedule', 'vehicle_schedule__vehicle', 'vehicle_schedule__route',
-            'vehicle_schedule__route__start_point', 'vehicle_schedule__route__end_point'
+            'vehicle_schedule__route__start_point', 'vehicle_schedule__route__end_point',
+            'pickup_point', 'destination_point'
         ).get(pk=pk)
     except VehicleTicketBooking.DoesNotExist:
         return Response({'error': 'Vehicle ticket booking not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -327,8 +384,8 @@ def vehicle_ticket_booking_ticket_pdf_view(request, pk):
 
     vs = b.vehicle_schedule
     route = vs.route if vs else None
-    start_name = route.start_point.name if route and route.start_point else "-"
-    end_name = route.end_point.name if route and route.end_point else "-"
+    start_name = b.pickup_point.name if b.pickup_point else (route.start_point.name if route and route.start_point else "-")
+    end_name = b.destination_point.name if b.destination_point else (route.end_point.name if route and route.end_point else "-")
     vehicle_name = vs.vehicle.name if vs and vs.vehicle else "-"
     date_str = vs.date.strftime('%d %b %Y') if vs and vs.date else "-"
     time_str = vs.time.strftime('%H:%M') if vs and vs.time else "-"
