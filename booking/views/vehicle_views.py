@@ -35,6 +35,49 @@ def _get_active_trip_for_vehicle(vehicle):
     }
 
 
+def _build_active_route_details(route):
+    """Build active_route_details dict from a Route instance, including stop_points."""
+    if not route:
+        return None
+    stop_points = []
+    for sp in route.stop_points.all().order_by('order'):
+        stop_points.append({
+            'id': str(sp.id),
+            'route': str(sp.route.id),
+            'place': str(sp.place.id),
+            'place_details': {
+                'id': str(sp.place.id),
+                'name': sp.place.name,
+                'code': sp.place.code,
+                'latitude': str(sp.place.latitude),
+                'longitude': str(sp.place.longitude),
+            },
+            'order': sp.order,
+            'created_at': sp.created_at.isoformat(),
+            'updated_at': sp.updated_at.isoformat(),
+        })
+    return {
+        'id': str(route.id),
+        'name': route.name,
+        'is_bidirectional': route.is_bidirectional,
+        'start_point_details': {
+            'id': str(route.start_point.id),
+            'name': route.start_point.name,
+            'code': route.start_point.code,
+            'latitude': str(route.start_point.latitude),
+            'longitude': str(route.start_point.longitude),
+        },
+        'end_point_details': {
+            'id': str(route.end_point.id),
+            'name': route.end_point.name,
+            'code': route.end_point.code,
+            'latitude': str(route.end_point.latitude),
+            'longitude': str(route.end_point.longitude),
+        },
+        'stop_points': stop_points,
+    }
+
+
 @api_view(['GET'])
 def vehicle_list_get_view(request):
     """List all vehicles"""
@@ -47,8 +90,9 @@ def vehicle_list_get_view(request):
     
     # Build queryset
     queryset = Vehicle.objects.prefetch_related(
-        'drivers', 'routes', 'seats', 'images'
-    ).all()
+        'drivers', 'routes', 'seats', 'images',
+        'active_route__stop_points__place',
+    ).select_related('active_route', 'active_route__start_point', 'active_route__end_point').all()
     
     if search:
         queryset = queryset.filter(
@@ -158,27 +202,7 @@ def vehicle_list_get_view(request):
             }
         
         # Build active_route_details
-        active_route_details = None
-        if vehicle.active_route:
-            active_route_details = {
-                'id': str(vehicle.active_route.id),
-                'name': vehicle.active_route.name,
-                'is_bidirectional': vehicle.active_route.is_bidirectional,
-                'start_point_details': {
-                    'id': str(vehicle.active_route.start_point.id),
-                    'name': vehicle.active_route.start_point.name,
-                    'code': vehicle.active_route.start_point.code,
-                    'latitude': str(vehicle.active_route.start_point.latitude),
-                    'longitude': str(vehicle.active_route.start_point.longitude),
-                },
-                'end_point_details': {
-                    'id': str(vehicle.active_route.end_point.id),
-                    'name': vehicle.active_route.end_point.name,
-                    'code': vehicle.active_route.end_point.code,
-                    'latitude': str(vehicle.active_route.end_point.latitude),
-                    'longitude': str(vehicle.active_route.end_point.longitude),
-                },
-            }
+        active_route_details = _build_active_route_details(vehicle.active_route)
         
         results.append({
             'id': str(vehicle.id),
@@ -454,27 +478,7 @@ def vehicle_list_post_view(request):
             'is_active': vehicle.active_driver.is_active,
         }
     
-    active_route_details = None
-    if vehicle.active_route:
-        active_route_details = {
-            'id': str(vehicle.active_route.id),
-            'name': vehicle.active_route.name,
-            'is_bidirectional': vehicle.active_route.is_bidirectional,
-            'start_point_details': {
-                'id': str(vehicle.active_route.start_point.id),
-                'name': vehicle.active_route.start_point.name,
-                'code': vehicle.active_route.start_point.code,
-                'latitude': str(vehicle.active_route.start_point.latitude),
-                'longitude': str(vehicle.active_route.start_point.longitude),
-            },
-            'end_point_details': {
-                'id': str(vehicle.active_route.end_point.id),
-                'name': vehicle.active_route.end_point.name,
-                'code': vehicle.active_route.end_point.code,
-                'latitude': str(vehicle.active_route.end_point.latitude),
-                'longitude': str(vehicle.active_route.end_point.longitude),
-            },
-        }
+    active_route_details = _build_active_route_details(vehicle.active_route)
     
     return Response({
         'id': str(vehicle.id),
@@ -513,8 +517,9 @@ def vehicle_detail_get_view(request, pk):
     """Retrieve a single vehicle"""
     try:
         vehicle = Vehicle.objects.prefetch_related(
-            'drivers', 'routes', 'seats', 'images'
-        ).select_related('active_driver', 'active_route').get(pk=pk)
+            'drivers', 'routes', 'seats', 'images',
+            'active_route__stop_points__place',
+        ).select_related('active_driver', 'active_route', 'active_route__start_point', 'active_route__end_point').get(pk=pk)
     except Vehicle.DoesNotExist:
         return Response({'error': 'Vehicle not found'}, status=status.HTTP_404_NOT_FOUND)
     
@@ -589,27 +594,7 @@ def vehicle_detail_get_view(request, pk):
             'is_active': vehicle.active_driver.is_active,
         }
     
-    active_route_details = None
-    if vehicle.active_route:
-        active_route_details = {
-            'id': str(vehicle.active_route.id),
-            'name': vehicle.active_route.name,
-            'is_bidirectional': vehicle.active_route.is_bidirectional,
-            'start_point_details': {
-                'id': str(vehicle.active_route.start_point.id),
-                'name': vehicle.active_route.start_point.name,
-                'code': vehicle.active_route.start_point.code,
-                'latitude': str(vehicle.active_route.start_point.latitude),
-                'longitude': str(vehicle.active_route.start_point.longitude),
-            },
-            'end_point_details': {
-                'id': str(vehicle.active_route.end_point.id),
-                'name': vehicle.active_route.end_point.name,
-                'code': vehicle.active_route.end_point.code,
-                'latitude': str(vehicle.active_route.end_point.latitude),
-                'longitude': str(vehicle.active_route.end_point.longitude),
-            },
-        }
+    active_route_details = _build_active_route_details(vehicle.active_route)
     
     return Response({
         'id': str(vehicle.id),
@@ -647,7 +632,10 @@ def vehicle_detail_get_view(request, pk):
 def vehicle_detail_post_view(request, pk):
     """Update/edit a vehicle"""
     try:
-        vehicle = Vehicle.objects.prefetch_related('drivers', 'routes', 'seats', 'images').get(pk=pk)
+        vehicle = Vehicle.objects.prefetch_related(
+            'drivers', 'routes', 'seats', 'images',
+            'active_route__stop_points__place',
+        ).select_related('active_driver', 'active_route', 'active_route__start_point', 'active_route__end_point').get(pk=pk)
     except Vehicle.DoesNotExist:
         return Response({'error': 'Vehicle not found'}, status=status.HTTP_404_NOT_FOUND)
     
@@ -896,27 +884,7 @@ def vehicle_detail_post_view(request, pk):
             'is_active': vehicle.active_driver.is_active,
         }
     
-    active_route_details = None
-    if vehicle.active_route:
-        active_route_details = {
-            'id': str(vehicle.active_route.id),
-            'name': vehicle.active_route.name,
-            'is_bidirectional': vehicle.active_route.is_bidirectional,
-            'start_point_details': {
-                'id': str(vehicle.active_route.start_point.id),
-                'name': vehicle.active_route.start_point.name,
-                'code': vehicle.active_route.start_point.code,
-                'latitude': str(vehicle.active_route.start_point.latitude),
-                'longitude': str(vehicle.active_route.start_point.longitude),
-            },
-            'end_point_details': {
-                'id': str(vehicle.active_route.end_point.id),
-                'name': vehicle.active_route.end_point.name,
-                'code': vehicle.active_route.end_point.code,
-                'latitude': str(vehicle.active_route.end_point.latitude),
-                'longitude': str(vehicle.active_route.end_point.longitude),
-            },
-        }
+    active_route_details = _build_active_route_details(vehicle.active_route)
     
     return Response({
         'id': str(vehicle.id),
@@ -1254,8 +1222,9 @@ def vehicle_connect_view(request):
     
     try:
         vehicle = Vehicle.objects.prefetch_related(
-            'drivers', 'routes', 'seats', 'images'
-        ).select_related('active_driver', 'active_route').get(pk=vehicle_id)
+            'drivers', 'routes', 'seats', 'images',
+            'active_route__stop_points__place',
+        ).select_related('active_driver', 'active_route', 'active_route__start_point', 'active_route__end_point').get(pk=vehicle_id)
     except Vehicle.DoesNotExist:
         return Response({'error': 'Vehicle not found'}, status=status.HTTP_404_NOT_FOUND)
     
@@ -1273,8 +1242,9 @@ def vehicle_connect_view(request):
     
     # Refresh vehicle to get updated data
     vehicle = Vehicle.objects.prefetch_related(
-        'drivers', 'routes', 'seats', 'images'
-    ).select_related('active_driver', 'active_route').get(pk=vehicle_id)
+        'drivers', 'routes', 'seats', 'images',
+        'active_route__stop_points__place',
+    ).select_related('active_driver', 'active_route', 'active_route__start_point', 'active_route__end_point').get(pk=vehicle_id)
     
     # Build response data (same format as vehicle_detail_get_view)
     driver_details = []
@@ -1347,27 +1317,7 @@ def vehicle_connect_view(request):
             'is_active': vehicle.active_driver.is_active,
         }
     
-    active_route_details = None
-    if vehicle.active_route:
-        active_route_details = {
-            'id': str(vehicle.active_route.id),
-            'name': vehicle.active_route.name,
-            'is_bidirectional': vehicle.active_route.is_bidirectional,
-            'start_point_details': {
-                'id': str(vehicle.active_route.start_point.id),
-                'name': vehicle.active_route.start_point.name,
-                'code': vehicle.active_route.start_point.code,
-                'latitude': str(vehicle.active_route.start_point.latitude),
-                'longitude': str(vehicle.active_route.start_point.longitude),
-            },
-            'end_point_details': {
-                'id': str(vehicle.active_route.end_point.id),
-                'name': vehicle.active_route.end_point.name,
-                'code': vehicle.active_route.end_point.code,
-                'latitude': str(vehicle.active_route.end_point.latitude),
-                'longitude': str(vehicle.active_route.end_point.longitude),
-            },
-        }
+    active_route_details = _build_active_route_details(vehicle.active_route)
     
     return Response({
         'id': str(vehicle.id),
@@ -1411,9 +1361,10 @@ def vehicle_my_active_get_view(request):
 
     vehicle = (
         Vehicle.objects.prefetch_related(
-            'drivers', 'routes', 'seats', 'images'
+            'drivers', 'routes', 'seats', 'images',
+            'active_route__stop_points__place',
         )
-        .select_related('active_driver', 'active_route')
+        .select_related('active_driver', 'active_route', 'active_route__start_point', 'active_route__end_point')
         .filter(active_driver=user)
         .order_by('-updated_at')
         .first()
@@ -1492,27 +1443,7 @@ def vehicle_my_active_get_view(request):
             'is_active': vehicle.active_driver.is_active,
         }
     
-    active_route_details = None
-    if vehicle.active_route:
-        active_route_details = {
-            'id': str(vehicle.active_route.id),
-            'name': vehicle.active_route.name,
-            'is_bidirectional': vehicle.active_route.is_bidirectional,
-            'start_point_details': {
-                'id': str(vehicle.active_route.start_point.id),
-                'name': vehicle.active_route.start_point.name,
-                'code': vehicle.active_route.start_point.code,
-                'latitude': str(vehicle.active_route.start_point.latitude),
-                'longitude': str(vehicle.active_route.start_point.longitude),
-            },
-            'end_point_details': {
-                'id': str(vehicle.active_route.end_point.id),
-                'name': vehicle.active_route.end_point.name,
-                'code': vehicle.active_route.end_point.code,
-                'latitude': str(vehicle.active_route.end_point.latitude),
-                'longitude': str(vehicle.active_route.end_point.longitude),
-            },
-        }
+    active_route_details = _build_active_route_details(vehicle.active_route)
     
     return Response({
         'vehicle': {
