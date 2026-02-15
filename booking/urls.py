@@ -37,6 +37,7 @@ urlpatterns = [
     path('vehicles/create/', vehicle_views.vehicle_list_post_view, name='vehicle-list-post'),
     path('vehicles/connect/', vehicle_views.vehicle_connect_view, name='vehicle-connect'),
     path('vehicles/my-active-vehicle/', vehicle_views.vehicle_my_active_get_view, name='vehicle-my-active'),
+    path('vehicles/<int:vehicle_id>/set-active-route/', vehicle_views.vehicle_set_active_route_view, name='vehicle-set-active-route'),
     path('vehicles/<int:pk>/', vehicle_views.vehicle_detail_get_view, name='vehicle-detail-get'),
     path('vehicles/<int:pk>/edit/', vehicle_views.vehicle_detail_post_view, name='vehicle-detail-post'),
     path('vehicles/<int:pk>/delete/', vehicle_views.vehicle_delete_get_view, name='vehicle-delete'),

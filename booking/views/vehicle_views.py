@@ -1351,6 +1351,100 @@ def vehicle_connect_view(request):
     }, status=status.HTTP_200_OK)
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def vehicle_set_active_route_view(request, vehicle_id):
+    """Set active route for the vehicle. Caller must be the active_driver of the vehicle."""
+    route_id = request.POST.get('route_id') or request.data.get('route_id')
+    if not route_id:
+        return Response({'error': 'route_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        vehicle = Vehicle.objects.prefetch_related(
+            'drivers', 'routes', 'seats', 'images',
+            'active_route__stop_points__place',
+        ).select_related('active_driver', 'active_route', 'active_route__start_point', 'active_route__end_point').get(pk=vehicle_id)
+    except Vehicle.DoesNotExist:
+        return Response({'error': 'Vehicle not found'}, status=status.HTTP_404_NOT_FOUND)
+    if vehicle.active_driver_id != request.user.id:
+        return Response(
+            {'error': 'Only the active driver of this vehicle can set the active route'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    try:
+        route = Route.objects.get(pk=route_id)
+    except Route.DoesNotExist:
+        return Response({'error': 'Route not found'}, status=status.HTTP_404_NOT_FOUND)
+    if not vehicle.routes.filter(pk=route.id).exists():
+        return Response(
+            {'error': 'Route is not assigned to this vehicle'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    vehicle.active_route = route
+    vehicle.save(update_fields=['active_route', 'updated_at'])
+    vehicle = Vehicle.objects.prefetch_related(
+        'drivers', 'routes', 'seats', 'images',
+        'active_route__stop_points__place',
+    ).select_related('active_driver', 'active_route', 'active_route__start_point', 'active_route__end_point').get(pk=vehicle_id)
+    driver_details = []
+    for driver in vehicle.drivers.all():
+        driver_details.append({
+            'id': str(driver.id), 'username': driver.username, 'phone': driver.phone,
+            'email': driver.email or '', 'name': driver.name or '',
+            'is_driver': driver.is_driver, 'is_active': driver.is_active,
+        })
+    route_details = []
+    for r in vehicle.routes.all():
+        route_details.append({
+            'id': str(r.id), 'name': r.name, 'is_bidirectional': r.is_bidirectional,
+            'start_point_details': {'id': str(r.start_point.id), 'name': r.start_point.name, 'code': r.start_point.code,
+                'latitude': str(r.start_point.latitude), 'longitude': str(r.start_point.longitude)},
+            'end_point_details': {'id': str(r.end_point.id), 'name': r.end_point.name, 'code': r.end_point.code,
+                'latitude': str(r.end_point.latitude), 'longitude': str(r.end_point.longitude)},
+        })
+    seats = []
+    for seat in vehicle.seats.all():
+        seats.append({
+            'id': str(seat.id), 'vehicle': str(seat.vehicle.id), 'side': seat.side,
+            'number': seat.number, 'status': seat.status,
+            'created_at': seat.created_at.isoformat(), 'updated_at': seat.updated_at.isoformat(),
+        })
+    images = []
+    for img in vehicle.images.all():
+        images.append({
+            'id': str(img.id), 'vehicle': str(img.vehicle.id), 'title': img.title or '',
+            'description': img.description or '', 'image': img.image.url if img.image else None,
+            'created_at': img.created_at.isoformat(), 'updated_at': img.updated_at.isoformat(),
+        })
+    active_driver_details = None
+    if vehicle.active_driver:
+        active_driver_details = {
+            'id': str(vehicle.active_driver.id), 'username': vehicle.active_driver.username,
+            'phone': vehicle.active_driver.phone, 'email': vehicle.active_driver.email or '',
+            'name': vehicle.active_driver.name or '', 'is_driver': vehicle.active_driver.is_driver,
+            'is_active': vehicle.active_driver.is_active,
+        }
+    active_route_details = _build_active_route_details(vehicle.active_route)
+    return Response({
+        'id': str(vehicle.id), 'imei': vehicle.imei or '', 'name': vehicle.name,
+        'vehicle_no': vehicle.vehicle_no, 'vehicle_type': vehicle.vehicle_type,
+        'odometer': str(vehicle.odometer), 'overspeed_limit': vehicle.overspeed_limit,
+        'description': vehicle.description or '', 'featured_image': vehicle.featured_image.url if vehicle.featured_image else None,
+        'drivers': [str(d.id) for d in vehicle.drivers.all()], 'driver_details': driver_details,
+        'active_driver': str(vehicle.active_driver.id) if vehicle.active_driver else None,
+        'active_driver_details': active_driver_details,
+        'routes': [str(r.id) for r in vehicle.routes.all()], 'route_details': route_details,
+        'active_route': str(vehicle.active_route.id) if vehicle.active_route else None,
+        'active_route_details': active_route_details,
+        'active_trip': _get_active_trip_for_vehicle(vehicle), 'is_active': vehicle.is_active,
+        'bill_book': vehicle.bill_book or '',
+        'bill_book_expiry_date': vehicle.bill_book_expiry_date.isoformat() if vehicle.bill_book_expiry_date else None,
+        'insurance_expiry_date': vehicle.insurance_expiry_date.isoformat() if vehicle.insurance_expiry_date else None,
+        'road_permit_expiry_date': vehicle.road_permit_expiry_date.isoformat() if vehicle.road_permit_expiry_date else None,
+        'seat_layout': getattr(vehicle, 'seat_layout', []) or [], 'seats': seats, 'images': images,
+        'created_at': vehicle.created_at.isoformat(), 'updated_at': vehicle.updated_at.isoformat(),
+    }, status=status.HTTP_200_OK)
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def vehicle_my_active_get_view(request):
