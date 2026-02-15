@@ -272,6 +272,12 @@ def trip_end_view(request, pk):
         speed=None,
     )
 
+    # Clear vehicle active driver and active route when trip ends
+    vehicle = trip.vehicle
+    vehicle.active_driver = None
+    vehicle.active_route = None
+    vehicle.save()
+
     return Response({
         'trip': _trip_to_response(trip),
         'within_destination': distance_km <= stop_radius_km,
