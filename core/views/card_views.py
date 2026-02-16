@@ -90,7 +90,7 @@ def card_detail_get_view(request, pk):
 def card_list_post_view(request):
     """Create a new card (admin). Body: user (optional), card_number, balance, is_active."""
     user_id = request.POST.get('user') or (request.data.get('user') if request.data else None)
-    card_number = (request.POST.get('card_number') or (request.data.get('card_number') if request.data else None) or ''
+    card_number = (request.POST.get('card_number') or (request.data.get('card_number') if request.data else None) or '')
     card_number = card_number.strip()
     balance = request.POST.get('balance') or (request.data.get('balance') if request.data else '0')
     is_active = request.POST.get('is_active') or (request.data.get('is_active') if request.data else 'true')
