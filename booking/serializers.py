@@ -118,6 +118,7 @@ class SeatBookingSerializer(serializers.ModelSerializer):
     vehicle_details = serializers.SerializerMethodField()
     vehicle_seat_details = VehicleSeatSerializer(source='vehicle_seat', read_only=True)
     trip_details = TripListSerializer(source='trip', read_only=True)
+    destination_place_details = PlaceListSerializer(source='destination_place', read_only=True)
     
     class Meta:
         model = SeatBooking
@@ -127,7 +128,7 @@ class SeatBookingSerializer(serializers.ModelSerializer):
             'check_in_lat', 'check_in_lng', 'check_in_datetime', 'check_in_address',
             'check_out_lat', 'check_out_lng', 'check_out_datetime', 'check_out_address',
             'trip_distance', 'trip_duration', 'trip_amount', 'is_paid',
-            'destination_place',
+            'destination_place', 'destination_place_details',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']

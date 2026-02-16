@@ -10,10 +10,15 @@ from ..models import Location, Vehicle, Trip
 
 
 def _location_to_response(loc):
+    v = getattr(loc, 'vehicle', None)
+    t = getattr(loc, 'trip', None)
     return {
         'id': str(loc.id),
-        'vehicle': str(loc.vehicle.id),
-        'trip': str(loc.trip.id) if loc.trip else None,
+        'vehicle': str(loc.vehicle_id),
+        'vehicle_name': v.name if v else None,
+        'vehicle_no': v.vehicle_no if v else None,
+        'trip': str(loc.trip_id) if loc.trip_id else None,
+        'trip_id': t.trip_id if t else None,
         'latitude': str(loc.latitude),
         'longitude': str(loc.longitude),
         'speed': str(loc.speed) if loc.speed is not None else None,
@@ -59,10 +64,10 @@ def location_list_post_view(request):
 
 @api_view(['GET'])
 def location_list_get_view(request):
-    """List locations, optionally filter by vehicle and/or trip."""
+    """List locations, optionally filter by vehicle and/or trip. Includes vehicle_name, vehicle_no, trip_id."""
     vehicle_id = request.query_params.get('vehicle')
     trip_id = request.query_params.get('trip')
-    queryset = Location.objects.select_related('vehicle', 'trip').all()
+    queryset = Location.objects.select_related('vehicle', 'trip').all().order_by('-created_at')
     if vehicle_id:
         queryset = queryset.filter(vehicle_id=vehicle_id)
     if trip_id:

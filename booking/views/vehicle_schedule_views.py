@@ -26,10 +26,15 @@ def _route_contains_place_before(route, from_place_id, to_place_id):
 
 
 def _schedule_to_response(s):
+    v = getattr(s, 'vehicle', None)
+    r = getattr(s, 'route', None)
     return {
         'id': str(s.id),
-        'vehicle': str(s.vehicle.id),
-        'route': str(s.route.id),
+        'vehicle': str(s.vehicle_id),
+        'vehicle_name': v.name if v else None,
+        'vehicle_no': v.vehicle_no if v else None,
+        'route': str(s.route_id),
+        'route_name': r.name if r else None,
         'date': s.date.isoformat(),
         'time': s.time.strftime('%H:%M:%S') if s.time else None,
         'price': str(s.price),
@@ -175,11 +180,24 @@ def _booked_seats_for_segment(schedule, from_order, to_order, order_map):
     return booked
 
 
+def _parse_date_vs(val):
+    if val is None or val == '':
+        return None
+    try:
+        return datetime.strptime(str(val).strip()[:10], '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return None
+
+
 @api_view(['GET'])
 def vehicle_schedule_list_get_view(request):
+    from django.db.models import Q
     vehicle_id = request.query_params.get('vehicle')
     route_id = request.query_params.get('route')
     date_str = request.query_params.get('date')
+    date_from = _parse_date_vs(request.query_params.get('date_from'))
+    date_to = _parse_date_vs(request.query_params.get('date_to'))
+    search = request.query_params.get('search', '').strip()
     from_place = request.query_params.get('from_place')
     to_place = request.query_params.get('to_place')
     expand = request.query_params.get('expand', '').lower() in ('1', 'true', 'yes')
@@ -190,11 +208,19 @@ def vehicle_schedule_list_get_view(request):
     if route_id:
         queryset = queryset.filter(route_id=route_id)
     if date_str:
-        try:
-            search_date = datetime.strptime(str(date_str).strip()[:10], '%Y-%m-%d').date()
+        search_date = _parse_date_vs(date_str)
+        if search_date:
             queryset = queryset.filter(date=search_date)
-        except ValueError:
-            pass
+    if date_from:
+        queryset = queryset.filter(date__gte=date_from)
+    if date_to:
+        queryset = queryset.filter(date__lte=date_to)
+    if search:
+        queryset = queryset.filter(
+            Q(vehicle__name__icontains=search) |
+            Q(vehicle__vehicle_no__icontains=search) |
+            Q(route__name__icontains=search)
+        )
     # Segment search: both from_place and to_place => filter by route containing both in order
     if from_place and to_place:
         from_place_id = int(from_place)
@@ -264,6 +290,7 @@ def vehicle_schedule_list_get_view(request):
         'count': total,
         'page': page,
         'per_page': per_page,
+        'stats': {'total_count': total},
     })
 
 

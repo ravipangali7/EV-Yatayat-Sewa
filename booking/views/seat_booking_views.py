@@ -33,9 +33,20 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     return Decimal(str(round(c * r, 2)))
 
 
+def _parse_date_sb(val):
+    if val is None or val == '':
+        return None
+    try:
+        from datetime import datetime
+        return datetime.strptime(str(val)[:10], '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return None
+
+
 @api_view(['GET'])
 def seat_booking_list_get_view(request):
-    """List all seat bookings"""
+    """List all seat bookings. Supports date_from, date_to (on check_in_datetime), search, filters. Returns stats."""
+    from django.db.models import Sum
     # Get query parameters
     search = request.query_params.get('search', '')
     vehicle_id = request.query_params.get('vehicle', None)
@@ -44,10 +55,12 @@ def seat_booking_list_get_view(request):
     is_guest = request.query_params.get('is_guest', None)
     is_paid = request.query_params.get('is_paid', None)
     vehicle_seat_id = request.query_params.get('vehicle_seat', None)
+    date_from = _parse_date_sb(request.query_params.get('date_from'))
+    date_to = _parse_date_sb(request.query_params.get('date_to'))
     
     # Build queryset
     queryset = SeatBooking.objects.select_related(
-        'user', 'vehicle', 'vehicle_seat', 'trip'
+        'user', 'vehicle', 'vehicle_seat', 'trip', 'destination_place'
     ).all()
     
     if driver_id:
@@ -78,23 +91,29 @@ def seat_booking_list_get_view(request):
     if vehicle_seat_id:
         queryset = queryset.filter(vehicle_seat_id=vehicle_seat_id)
     
+    if date_from:
+        queryset = queryset.filter(check_in_datetime__date__gte=date_from)
+    if date_to:
+        queryset = queryset.filter(check_in_datetime__date__lte=date_to)
+    
+    total = queryset.count()
+    sum_revenue = queryset.aggregate(s=Sum('trip_amount'))['s'] or 0
+    
     # Pagination
     page = int(request.query_params.get('page', 1))
     per_page = int(request.query_params.get('per_page', 10))
     start = (page - 1) * per_page
     end = start + per_page
-    
-    total = queryset.count()
     bookings = queryset.order_by('-created_at')[start:end]
     
-    # Serialize results
     serializer = SeatBookingSerializer(bookings, many=True)
     
     return Response({
         'results': serializer.data,
         'count': total,
         'page': page,
-        'per_page': per_page
+        'per_page': per_page,
+        'stats': {'total_count': total, 'sum_revenue': str(sum_revenue)},
     })
 
 

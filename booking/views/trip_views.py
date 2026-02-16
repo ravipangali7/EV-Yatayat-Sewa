@@ -26,18 +26,26 @@ def haversine_km(lat1, lon1, lat2, lon2):
 
 
 def _trip_to_response(trip):
-    """Build trip dict for API response."""
+    """Build trip dict for API response with display names for vehicle, driver, route."""
+    v = trip.vehicle if hasattr(trip, 'vehicle') and trip.vehicle else None
+    d = trip.driver if hasattr(trip, 'driver') and trip.driver else None
+    r = trip.route if hasattr(trip, 'route') and trip.route else None
     return {
         'id': str(trip.id),
         'trip_id': trip.trip_id,
-        'vehicle': str(trip.vehicle.id),
-        'driver': str(trip.driver.id),
-        'route': str(trip.route.id),
+        'vehicle': str(trip.vehicle_id),
+        'vehicle_name': v.name if v else None,
+        'vehicle_no': v.vehicle_no if v else None,
+        'driver': str(trip.driver_id),
+        'driver_name': d.name if d else None,
+        'driver_phone': d.phone if d else None,
+        'route': str(trip.route_id),
+        'route_name': r.name if r else None,
         'start_time': trip.start_time.isoformat() if trip.start_time else None,
         'end_time': trip.end_time.isoformat() if trip.end_time else None,
         'remarks': trip.remarks or '',
         'is_scheduled': trip.is_scheduled,
-        'vehicle_schedule': str(trip.vehicle_schedule.id) if trip.vehicle_schedule else None,
+        'vehicle_schedule': str(trip.vehicle_schedule_id) if trip.vehicle_schedule_id else None,
         'created_at': trip.created_at.isoformat(),
         'updated_at': trip.updated_at.isoformat(),
     }
@@ -296,14 +304,27 @@ def trip_end_view(request, pk):
     }, status=status.HTTP_200_OK)
 
 
+def _parse_date(val):
+    if val is None or val == '':
+        return None
+    try:
+        from datetime import datetime as dt
+        return dt.strptime(str(val)[:10], '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return None
+
+
 @api_view(['GET'])
 def trip_list_get_view(request):
-    """List trips with filters."""
+    """List trips with filters: vehicle, driver, route, active_only, search (trip_id), date_from, date_to."""
     from django.db.models import Q
     vehicle_id = request.query_params.get('vehicle')
     driver_id = request.query_params.get('driver')
     route_id = request.query_params.get('route')
     active_only = request.query_params.get('active_only')
+    search = request.query_params.get('search', '').strip()
+    date_from = _parse_date(request.query_params.get('date_from'))
+    date_to = _parse_date(request.query_params.get('date_to'))
 
     queryset = Trip.objects.select_related('vehicle', 'driver', 'route').all()
     if vehicle_id:
@@ -314,12 +335,18 @@ def trip_list_get_view(request):
         queryset = queryset.filter(route_id=route_id)
     if active_only and active_only.lower() == 'true':
         queryset = queryset.filter(end_time__isnull=True)
+    if search:
+        queryset = queryset.filter(trip_id__icontains=search)
+    if date_from:
+        queryset = queryset.filter(start_time__date__gte=date_from)
+    if date_to:
+        queryset = queryset.filter(start_time__date__lte=date_to)
 
+    total = queryset.count()
     page = int(request.query_params.get('page', 1))
     per_page = int(request.query_params.get('per_page', 10))
     start = (page - 1) * per_page
     end = start + per_page
-    total = queryset.count()
     trips = queryset.order_by('-created_at')[start:end]
 
     return Response({
@@ -327,17 +354,89 @@ def trip_list_get_view(request):
         'count': total,
         'page': page,
         'per_page': per_page,
+        'stats': {'total_count': total},
     })
+
+
+def _location_to_response(loc):
+    return {
+        'id': str(loc.id),
+        'latitude': str(loc.latitude),
+        'longitude': str(loc.longitude),
+        'speed': str(loc.speed) if loc.speed is not None else None,
+        'created_at': loc.created_at.isoformat(),
+    }
 
 
 @api_view(['GET'])
 def trip_detail_get_view(request, pk):
-    """Get single trip."""
+    """Get single trip with locations, seat_bookings, revenue, vehicle_schedule, ticket_bookings."""
+    from django.db.models import Sum
+    from ..serializers import SeatBookingSerializer
     try:
-        trip = Trip.objects.select_related('vehicle', 'driver', 'route').get(pk=pk)
+        trip = Trip.objects.select_related(
+            'vehicle', 'driver', 'route', 'vehicle_schedule',
+            'vehicle_schedule__vehicle', 'vehicle_schedule__route',
+            'vehicle_schedule__route__start_point', 'vehicle_schedule__route__end_point',
+        ).prefetch_related(
+            'locations',
+            'seat_bookings__user',
+            'seat_bookings__vehicle_seat',
+            'seat_bookings__destination_place',
+            'vehicle_schedule__ticket_bookings',
+            'vehicle_schedule__ticket_bookings__pickup_point',
+            'vehicle_schedule__ticket_bookings__destination_point',
+        ).get(pk=pk)
     except Trip.DoesNotExist:
         return Response({'error': 'Trip not found'}, status=status.HTTP_404_NOT_FOUND)
-    return Response(_trip_to_response(trip))
+
+    data = _trip_to_response(trip)
+
+    # Locations for this trip (ordered by created_at for polyline/playback)
+    locations = list(trip.locations.all().order_by('created_at'))
+    data['locations'] = [_location_to_response(loc) for loc in locations]
+
+    # Seat bookings with full nested data
+    seat_bookings = trip.seat_bookings.all().select_related(
+        'user', 'vehicle', 'vehicle_seat', 'destination_place'
+    ).order_by('check_in_datetime')
+    data['seat_bookings'] = SeatBookingSerializer(seat_bookings, many=True).data
+
+    # Revenue: seat booking total + ticket total (if scheduled)
+    seat_revenue_agg = trip.seat_bookings.aggregate(s=Sum('trip_amount'))
+    total_seat_booking_revenue = seat_revenue_agg['s'] or Decimal('0')
+    data['total_seat_booking_revenue'] = str(total_seat_booking_revenue)
+    ticket_revenue = Decimal('0')
+    data['vehicle_schedule'] = None
+    data['ticket_bookings'] = []
+    if trip.vehicle_schedule_id:
+        vs = trip.vehicle_schedule
+        data['vehicle_schedule'] = {
+            'id': str(vs.id),
+            'date': vs.date.isoformat(),
+            'time': vs.time.strftime('%H:%M') if vs.time else None,
+            'price': str(vs.price),
+            'route_name': vs.route.name if vs.route else None,
+            'vehicle_name': vs.vehicle.name if vs.vehicle else None,
+            'vehicle_no': vs.vehicle.vehicle_no if vs.vehicle else None,
+        }
+        for tb in vs.ticket_bookings.all().select_related('pickup_point', 'destination_point'):
+            ticket_revenue += tb.price
+            data['ticket_bookings'].append({
+                'id': str(tb.id),
+                'pnr': tb.pnr,
+                'name': tb.name,
+                'phone': tb.phone,
+                'seat': tb.seat,
+                'price': str(tb.price),
+                'is_paid': tb.is_paid,
+                'pickup_point_name': tb.pickup_point.name if tb.pickup_point else None,
+                'destination_point_name': tb.destination_point.name if tb.destination_point else None,
+            })
+    data['ticket_revenue'] = str(ticket_revenue)
+    data['total_revenue'] = str(total_seat_booking_revenue + ticket_revenue)
+
+    return Response(data)
 
 
 @api_view(['POST'])

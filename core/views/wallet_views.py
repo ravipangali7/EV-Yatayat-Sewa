@@ -34,7 +34,10 @@ def wallet_list_get_view(request):
     start = (page - 1) * per_page
     end = start + per_page
     
+    from django.db.models import Sum
     total = queryset.count()
+    balance_agg = queryset.aggregate(s=Sum('balance'))
+    total_balance = balance_agg['s'] or 0
     wallets = queryset[start:end]
     
     # Return data without serializer
@@ -63,7 +66,8 @@ def wallet_list_get_view(request):
         'results': results,
         'count': total,
         'page': page,
-        'per_page': per_page
+        'per_page': per_page,
+        'stats': {'total_count': total, 'total_balance': str(total_balance)},
     })
 
 

@@ -30,14 +30,20 @@ def _ticket_booking_to_response(b, include_schedule_details=False):
         seat = _seat_to_list(seat) if seat else []
     data = {
         'id': str(b.id),
-        'user': str(b.user.id) if b.user else None,
+        'user': str(b.user.id) if b.user_id else None,
+        'user_name': b.user.name if getattr(b, 'user', None) else None,
+        'user_phone': b.user.phone if getattr(b, 'user', None) else None,
         'is_guest': b.is_guest,
         'booked_by': str(b.booked_by.id) if b.booked_by_id else None,
+        'booked_by_name': b.booked_by.name if getattr(b, 'booked_by', None) else None,
+        'booked_by_phone': b.booked_by.phone if getattr(b, 'booked_by', None) else None,
         'name': b.name,
         'phone': b.phone,
         'vehicle_schedule': str(b.vehicle_schedule.id),
         'pickup_point': str(b.pickup_point.id) if b.pickup_point_id else None,
+        'pickup_point_name': b.pickup_point.name if getattr(b, 'pickup_point', None) else None,
         'destination_point': str(b.destination_point.id) if b.destination_point_id else None,
+        'destination_point_name': b.destination_point.name if getattr(b, 'destination_point', None) else None,
         'ticket_id': b.ticket_id,
         'seat': seat,
         'price': str(b.price),
@@ -61,11 +67,25 @@ def _ticket_booking_to_response(b, include_schedule_details=False):
     return data
 
 
+def _parse_date_vtb(val):
+    if val is None or val == '':
+        return None
+    try:
+        from datetime import datetime
+        return datetime.strptime(str(val)[:10], '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return None
+
+
 @api_view(['GET'])
 def vehicle_ticket_booking_list_get_view(request):
+    from django.db.models import Q, Sum
     vs_id = request.query_params.get('vehicle_schedule')
     user_id = request.query_params.get('user')
     booked_by_id = request.query_params.get('booked_by')
+    search = request.query_params.get('search', '').strip()
+    date_from = _parse_date_vtb(request.query_params.get('date_from'))
+    date_to = _parse_date_vtb(request.query_params.get('date_to'))
     queryset = VehicleTicketBooking.objects.select_related('user', 'booked_by', 'vehicle_schedule', 'pickup_point', 'destination_point').all()
     if vs_id:
         queryset = queryset.filter(vehicle_schedule_id=vs_id)
@@ -73,11 +93,23 @@ def vehicle_ticket_booking_list_get_view(request):
         queryset = queryset.filter(user_id=user_id)
     if booked_by_id:
         queryset = queryset.filter(booked_by_id=booked_by_id)
+    if search:
+        queryset = queryset.filter(
+            Q(name__icontains=search) |
+            Q(phone__icontains=search) |
+            Q(pnr__icontains=search) |
+            Q(ticket_id__icontains=search)
+        )
+    if date_from:
+        queryset = queryset.filter(created_at__date__gte=date_from)
+    if date_to:
+        queryset = queryset.filter(created_at__date__lte=date_to)
+    total = queryset.count()
+    sum_price = queryset.aggregate(s=Sum('price'))['s'] or 0
     page = int(request.query_params.get('page', 1))
     per_page = int(request.query_params.get('per_page', 10))
     start = (page - 1) * per_page
     end = start + per_page
-    total = queryset.count()
     items = queryset.order_by('-created_at')[start:end]
     expand = request.query_params.get('expand', '').lower() in ('1', 'true', 'yes')
     return Response({
@@ -85,6 +117,7 @@ def vehicle_ticket_booking_list_get_view(request):
         'count': total,
         'page': page,
         'per_page': per_page,
+        'stats': {'total_count': total, 'sum_price': str(sum_price)},
     })
 
 

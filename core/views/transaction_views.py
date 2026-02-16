@@ -50,9 +50,20 @@ def _transaction_to_response(transaction):
     return data
 
 
+def _parse_date(val):
+    if val is None or val == '':
+        return None
+    try:
+        from datetime import datetime
+        return datetime.strptime(str(val)[:10], '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return None
+
+
 @api_view(['GET'])
 def transaction_list_get_view(request):
-    """List all transactions"""
+    """List all transactions. Supports date_from, date_to (on created_at), search, filters. Returns stats for same filters."""
+    from django.db.models import Sum
     # Get query parameters
     search = request.query_params.get('search', '')
     status_filter = request.query_params.get('status', None)
@@ -60,6 +71,8 @@ def transaction_list_get_view(request):
     wallet_id = request.query_params.get('wallet', None)
     user_id = request.query_params.get('user', None)
     card_id = request.query_params.get('card', None)
+    date_from = _parse_date(request.query_params.get('date_from'))
+    date_to = _parse_date(request.query_params.get('date_to'))
     
     # Build queryset
     queryset = Transaction.objects.select_related('wallet', 'user', 'card').all()
@@ -86,15 +99,23 @@ def transaction_list_get_view(request):
     if card_id:
         queryset = queryset.filter(card_id=card_id)
     
+    if date_from:
+        queryset = queryset.filter(created_at__date__gte=date_from)
+    if date_to:
+        queryset = queryset.filter(created_at__date__lte=date_to)
+    
     queryset = queryset.order_by('-created_at')
+    
+    # Stats (same filters)
+    total = queryset.count()
+    sum_amount_agg = queryset.aggregate(s=Sum('amount'))
+    sum_amount = sum_amount_agg['s'] or 0
     
     # Pagination
     page = int(request.query_params.get('page', 1))
     per_page = int(request.query_params.get('per_page', 10))
     start = (page - 1) * per_page
     end = start + per_page
-    
-    total = queryset.count()
     transactions = queryset[start:end]
     
     results = [_transaction_to_response(t) for t in transactions]
@@ -102,7 +123,11 @@ def transaction_list_get_view(request):
         'results': results,
         'count': total,
         'page': page,
-        'per_page': per_page
+        'per_page': per_page,
+        'stats': {
+            'total_count': total,
+            'sum_amount': str(sum_amount),
+        },
     })
 
 

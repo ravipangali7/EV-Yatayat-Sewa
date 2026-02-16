@@ -49,7 +49,8 @@ def place_list_get_view(request):
         'results': results,
         'count': total,
         'page': page,
-        'per_page': per_page
+        'per_page': per_page,
+        'stats': {'total_count': total},
     })
 
 

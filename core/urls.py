@@ -6,9 +6,12 @@ from .views import (
     transaction_views,
     super_setting_views,
     card_views,
+    dashboard_views,
 )
 
 urlpatterns = [
+    # Dashboard stats (admin)
+    path('dashboard/stats/', dashboard_views.dashboard_stats_view, name='dashboard-stats'),
     # Authentication endpoints
     path('auth/login/', auth_views.login_view, name='auth-login'),
     path('auth/logout/', auth_views.logout_view, name='auth-logout'),
@@ -37,8 +40,11 @@ urlpatterns = [
     
     # Card endpoints
     path('cards/', card_views.card_list_get_view, name='card-list-get'),
+    path('cards/create/', card_views.card_list_post_view, name='card-list-post'),
     path('cards/search/', card_views.card_search_by_number_view, name='card-search'),
     path('cards/<int:pk>/', card_views.card_detail_get_view, name='card-detail-get'),
+    path('cards/<int:pk>/edit/', card_views.card_detail_put_or_patch_view, name='card-detail-edit'),
+    path('cards/<int:pk>/delete/', card_views.card_delete_get_view, name='card-delete'),
     path('cards/<int:pk>/topup/', card_views.card_topup_view, name='card-topup'),
     
     # Transaction endpoints
