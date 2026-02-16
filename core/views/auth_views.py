@@ -8,6 +8,7 @@ import secrets
 from ..models import User, Wallet, OTPVerification
 from ..serializers import (
     LoginSerializer, UserSerializer, RegisterSerializer,
+    RegisterRequestOtpSerializer, RegisterVerifyOtpSerializer,
     ForgotPasswordSerializer, VerifyOTPSerializer, ChangePasswordSerializer
 )
 from ..services.sms_service import sms_service
@@ -78,6 +79,59 @@ def register_view(request):
         token, created = Token.objects.get_or_create(user=user)
         user_serializer = UserSerializer(user)
         
+        return Response({
+            'token': token.key,
+            'user': user_serializer.data,
+            'message': 'User registered successfully'
+        }, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def register_request_otp_view(request):
+    """Request OTP for registration - send SMS, do not create user"""
+    serializer = RegisterRequestOtpSerializer(data=request.data)
+    if serializer.is_valid():
+        phone = serializer.validated_data['phone']
+        otp_obj = OTPVerification.create_otp(phone=phone, reset_token=None)
+        sms_result = sms_service.send_otp(phone, otp_obj.otp_code)
+        return Response({
+            'message': 'OTP sent',
+            'phone': phone
+        }, status=status.HTTP_200_OK)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def register_verify_view(request):
+    """Verify OTP and create user (register)"""
+    serializer = RegisterVerifyOtpSerializer(data=request.data)
+    if serializer.is_valid():
+        phone = serializer.validated_data['phone']
+        name = serializer.validated_data['name']
+        email = serializer.validated_data.get('email')
+        password = serializer.validated_data['password']
+        otp_obj = serializer.validated_data['otp_obj']
+        
+        user = User.objects.create(
+            phone=phone,
+            username=phone,
+            name=name,
+            email=email,
+            is_driver=False
+        )
+        user.set_password(password)
+        user.save()
+        
+        Wallet.objects.create(user=user, balance=0, to_pay=0, to_receive=0)
+        
+        otp_obj.is_used = True
+        otp_obj.save()
+        
+        token, created = Token.objects.get_or_create(user=user)
+        user_serializer = UserSerializer(user)
         return Response({
             'token': token.key,
             'user': user_serializer.data,

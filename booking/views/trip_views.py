@@ -235,6 +235,18 @@ def trip_end_view(request, pk):
     if trip.driver_id != user.id:
         return Response({'error': 'You are not the driver of this trip'}, status=status.HTTP_403_FORBIDDEN)
 
+    pending = list(
+        SeatBooking.objects.filter(trip=trip, check_out_datetime__isnull=True)
+        .select_related('vehicle_seat')
+        .values_list('vehicle_seat__side', 'vehicle_seat__number')
+    )
+    if pending:
+        pending_labels = [f"{s}{n}" for s, n in pending if s and n is not None]
+        return Response({
+            'error': 'Check out all passengers first.',
+            'pending_seat_bookings': pending_labels,
+        }, status=status.HTTP_400_BAD_REQUEST)
+
     end_place = trip.route.end_point
     distance_km = haversine_km(
         float(latitude), float(longitude),

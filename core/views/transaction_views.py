@@ -86,6 +86,8 @@ def transaction_list_get_view(request):
     if card_id:
         queryset = queryset.filter(card_id=card_id)
     
+    queryset = queryset.order_by('-created_at')
+    
     # Pagination
     page = int(request.query_params.get('page', 1))
     per_page = int(request.query_params.get('per_page', 10))

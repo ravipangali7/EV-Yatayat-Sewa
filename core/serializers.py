@@ -39,6 +39,48 @@ class RegisterSerializer(serializers.Serializer):
         return value
 
 
+class RegisterRequestOtpSerializer(serializers.Serializer):
+    """Serializer for requesting OTP during registration (phone only)"""
+    phone = serializers.CharField(required=True, max_length=100)
+    
+    def validate_phone(self, value):
+        if User.objects.filter(phone=value).exists():
+            raise serializers.ValidationError('User with this phone number already exists.')
+        return value
+
+
+class RegisterVerifyOtpSerializer(serializers.Serializer):
+    """Serializer for verifying OTP and completing registration"""
+    phone = serializers.CharField(required=True, max_length=100)
+    otp_code = serializers.CharField(required=True, max_length=6, min_length=6)
+    name = serializers.CharField(required=True, max_length=100)
+    email = serializers.EmailField(required=False, allow_blank=True, allow_null=True)
+    password = serializers.CharField(required=True, write_only=True, min_length=6, style={'input_type': 'password'})
+    
+    def validate(self, attrs):
+        from .models import OTPVerification
+        phone = attrs.get('phone')
+        otp_code = attrs.get('otp_code')
+        try:
+            otp_obj = OTPVerification.objects.filter(
+                phone=phone,
+                otp_code=otp_code,
+                is_used=False
+            ).order_by('-created_at').first()
+            if not otp_obj:
+                raise serializers.ValidationError('Invalid OTP code.')
+            if otp_obj.is_expired():
+                raise serializers.ValidationError('OTP code has expired.')
+            attrs['otp_obj'] = otp_obj
+        except serializers.ValidationError:
+            raise
+        except Exception:
+            raise serializers.ValidationError('Invalid OTP code.')
+        if User.objects.filter(phone=phone).exists():
+            raise serializers.ValidationError('User with this phone number already exists.')
+        return attrs
+
+
 class ForgotPasswordSerializer(serializers.Serializer):
     """Serializer for forgot password request"""
     phone = serializers.CharField(required=True, max_length=100)

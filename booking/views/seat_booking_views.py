@@ -40,6 +40,7 @@ def seat_booking_list_get_view(request):
     search = request.query_params.get('search', '')
     vehicle_id = request.query_params.get('vehicle', None)
     user_id = request.query_params.get('user', None)
+    driver_id = request.query_params.get('driver', None)
     is_guest = request.query_params.get('is_guest', None)
     is_paid = request.query_params.get('is_paid', None)
     vehicle_seat_id = request.query_params.get('vehicle_seat', None)
@@ -48,6 +49,9 @@ def seat_booking_list_get_view(request):
     queryset = SeatBooking.objects.select_related(
         'user', 'vehicle', 'vehicle_seat', 'trip'
     ).all()
+    
+    if driver_id:
+        queryset = queryset.filter(trip__isnull=False, trip__driver_id=driver_id)
     
     if search:
         queryset = queryset.filter(
@@ -376,10 +380,15 @@ def seat_booking_switch_view(request):
     return Response(serializer.data)
 
 
+DESTINATION_RADIUS_KM = Decimal('0.5')  # 500 meters
+
+
 @api_view(['POST'])
 def seat_booking_checkout_view(request):
     """Checkout with distance/duration/amount calculation.
     Optional place_id: when provided (e.g. current stop), validate booking.destination_place_id matches.
+    When booking has destination_place: within 500m use destination coords and keep trip_amount;
+    outside 500m return preview (within_destination: false) until confirm_out_of_range=true.
     """
     vehicle_seat_id = request.POST.get('vehicle_seat_id') or request.data.get('vehicle_seat_id')
     check_out_lat = request.POST.get('check_out_lat') or request.data.get('check_out_lat')
@@ -387,19 +396,22 @@ def seat_booking_checkout_view(request):
     check_out_address = request.POST.get('check_out_address') or request.data.get('check_out_address', '')
     is_paid = request.POST.get('is_paid') or request.data.get('is_paid', 'false')
     place_id = request.POST.get('place_id') or request.data.get('place_id')
+    confirm_out_of_range = request.POST.get('confirm_out_of_range') or request.data.get('confirm_out_of_range')
+    if isinstance(confirm_out_of_range, str):
+        confirm_out_of_range = confirm_out_of_range.lower() in ('true', '1', 'yes')
+    else:
+        confirm_out_of_range = bool(confirm_out_of_range)
 
     if not vehicle_seat_id:
         return Response({'error': 'Vehicle seat is required'}, status=status.HTTP_400_BAD_REQUEST)
     if not check_out_lat or not check_out_lng:
         return Response({'error': 'Check-out location (lat/lng) is required'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Get the seat
     try:
         vehicle_seat = VehicleSeat.objects.get(pk=vehicle_seat_id)
     except VehicleSeat.DoesNotExist:
         return Response({'error': 'Vehicle seat not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    # Get the latest booking for this seat that hasn't been checked out
     try:
         booking = SeatBooking.objects.select_related('trip', 'trip__driver', 'destination_place').filter(
             vehicle_seat=vehicle_seat,
@@ -414,35 +426,67 @@ def seat_booking_checkout_view(request):
                 {'error': 'This passenger is not scheduled to get off at this stop. Wrong stop.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-    
-    # Calculate distance
+
+    try:
+        super_setting = SuperSetting.objects.latest('created_at')
+        per_km_charge = super_setting.per_km_charge
+    except SuperSetting.DoesNotExist:
+        per_km_charge = None
+
+    use_destination_coords = False
+    if booking.destination_place_id and booking.destination_place:
+        dest_place = booking.destination_place
+        dist_to_dest_km = haversine_distance(
+            float(check_out_lat), float(check_out_lng),
+            float(dest_place.latitude), float(dest_place.longitude)
+        )
+        if dist_to_dest_km <= DESTINATION_RADIUS_KM:
+            use_destination_coords = True
+            check_out_lat = dest_place.latitude
+            check_out_lng = dest_place.longitude
+            check_out_address = (dest_place.address or '').strip() or str(dest_place.name)
+        elif not confirm_out_of_range:
+            distance_from_checkin = haversine_distance(
+                booking.check_in_lat, booking.check_in_lng,
+                Decimal(str(check_out_lat)), Decimal(str(check_out_lng))
+            )
+            new_trip_amount = distance_from_checkin * per_km_charge if per_km_charge else booking.trip_amount
+            new_trip_amount = Decimal(str(round(new_trip_amount, 2)))
+            destination_trip_amount = booking.trip_amount or Decimal('0')
+            amount_diff = new_trip_amount - destination_trip_amount
+            return Response({
+                'within_destination': False,
+                'distance_meters': int(float(dist_to_dest_km) * 1000),
+                'current_trip_amount': str(booking.trip_amount or 0),
+                'destination_trip_amount': str(destination_trip_amount),
+                'new_trip_amount': str(new_trip_amount),
+                'amount_difference': str(amount_diff),
+            }, status=status.HTTP_200_OK)
+
+    # Calculate distance (check-in to actual check-out point)
     distance = haversine_distance(
         booking.check_in_lat,
         booking.check_in_lng,
         Decimal(str(check_out_lat)),
         Decimal(str(check_out_lng))
     )
-    
-    # Calculate duration (in seconds)
+
     check_out_time = datetime.now()
     if booking.check_in_datetime.tzinfo:
         check_out_time = datetime.now(booking.check_in_datetime.tzinfo)
     duration = int((check_out_time - booking.check_in_datetime).total_seconds())
-    
-    # Trip amount: for scheduled trips use existing (pre-set from ticket); else calculate from distance
+
     is_scheduled_trip = booking.trip_id and getattr(booking.trip, 'is_scheduled', False)
     if is_scheduled_trip and booking.trip_amount is not None and booking.trip_amount > 0:
         trip_amount = booking.trip_amount
+    elif use_destination_coords and booking.trip_amount is not None:
+        trip_amount = booking.trip_amount
     else:
-        try:
-            super_setting = SuperSetting.objects.latest('created_at')
-            per_km_charge = super_setting.per_km_charge
-        except SuperSetting.DoesNotExist:
+        if not per_km_charge:
             return Response({'error': 'Super setting not found. Please configure per_km_charge.'}, status=status.HTTP_400_BAD_REQUEST)
         trip_amount = Decimal(str(distance)) * per_km_charge
         trip_amount = Decimal(str(round(trip_amount, 2)))
-    
-    # Update booking
+
     booking.check_out_lat = Decimal(str(check_out_lat))
     booking.check_out_lng = Decimal(str(check_out_lng))
     booking.check_out_datetime = check_out_time
@@ -452,36 +496,16 @@ def seat_booking_checkout_view(request):
     booking.trip_amount = trip_amount
     booking.is_paid = is_paid.lower() == 'true' if isinstance(is_paid, str) else bool(is_paid)
     booking.save()
-    
-    # Update seat status to available
+
     vehicle_seat.status = 'available'
     vehicle_seat.save()
-    
-    # Add trip amount to passenger wallet to_pay and create transaction (driver -> user -> wallet -> to_pay)
-    if booking.user and booking.trip_amount and booking.trip_amount > 0:
-        wallet, _ = Wallet.objects.get_or_create(user=booking.user, defaults={'balance': 0, 'to_pay': 0, 'to_receive': 0})
-        balance_before = wallet.balance
-        balance_after = wallet.balance
-        Wallet.objects.filter(pk=wallet.pk).update(to_pay=F('to_pay') + booking.trip_amount)
-        wallet.refresh_from_db()
-        Transaction.objects.create(
-            wallet=wallet,
-            user=booking.user,
-            amount=booking.trip_amount,
-            balance_before=balance_before,
-            balance_after=balance_after,
-            type='add',
-            status='success',
-            remarks=f'Trip amount - Seat booking #{booking.id}',
-        )
-    
-    # For normal (non-scheduled) trip: add trip_amount to driver's to_receive. Scheduled trips already paid via ticket.
+
     if booking.trip_id and booking.trip_amount and booking.trip_amount > 0 and booking.trip and not getattr(booking.trip, 'is_scheduled', False):
         driver = booking.trip.driver
         if driver:
             driver_wallet, _ = Wallet.objects.get_or_create(user=driver, defaults={'balance': 0, 'to_pay': 0, 'to_receive': 0})
             balance_before = driver_wallet.balance
-            Wallet.objects.filter(pk=driver_wallet.pk).update(to_receive=F('to_receive') + booking.trip_amount)
+            Wallet.objects.filter(pk=driver_wallet.pk).update(to_pay=F('to_pay') + booking.trip_amount)
             driver_wallet.refresh_from_db()
             Transaction.objects.create(
                 wallet=driver_wallet,
@@ -491,8 +515,8 @@ def seat_booking_checkout_view(request):
                 balance_after=driver_wallet.balance,
                 type='add',
                 status='success',
-                remarks=f'Trip amount (driver) - Seat booking #{booking.id}',
+                remarks=f'Trip amount (driver, to_pay) - Seat booking #{booking.id}',
             )
-    
+
     serializer = SeatBookingSerializer(booking)
     return Response(serializer.data)
