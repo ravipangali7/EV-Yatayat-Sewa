@@ -8,12 +8,13 @@ from core.models import SuperSetting
 
 
 def _default_announcement_text(place):
-    """Return stop_point_announcement_header + ' ' + place.name from latest SuperSetting, or place.name."""
+    """Return stop_point_announcement_header with $x replaced by place.name from latest SuperSetting, or place.name."""
     try:
         ss = SuperSetting.objects.latest('created_at')
         header = (getattr(ss, 'stop_point_announcement_header', None) or '').strip()
         if header:
-            return f"{header} {place.name}".strip()[:500]
+            name = (place.name or '').strip()
+            return (header.replace('$x', name).replace('$X', name).strip() or name)[:500]
     except (SuperSetting.DoesNotExist, (TypeError, ValueError)):
         pass
     return (place.name or '')[:500]
@@ -171,6 +172,7 @@ def route_list_post_view(request):
             if place_id:
                 try:
                     place = Place.objects.get(pk=place_id)
+                    # When blank/missing/whitespace, use default template (e.g. "अब हामी $x पुग्दैछौं।" with $x = place name)
                     ann = (sp_data.get('announcement_text') or '').strip()
                     if not ann:
                         ann = _default_announcement_text(place)
@@ -329,6 +331,7 @@ def route_detail_post_view(request, pk):
                 if place_id:
                     try:
                         place = Place.objects.get(pk=place_id)
+                        # When blank/missing/whitespace, use default template ($x = place name)
                         ann = (sp_data.get('announcement_text') or '').strip()
                         if not ann:
                             ann = _default_announcement_text(place)

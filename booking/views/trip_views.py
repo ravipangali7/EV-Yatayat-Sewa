@@ -535,7 +535,14 @@ def trip_current_stop_view(request):
         dist = haversine_km(lat_f, lng_f, float(place.latitude), float(place.longitude))
         if dist <= radius_km:
             if rsp is not None:
-                announcement_text = (getattr(rsp, 'announcement_text', None) or '').strip() or (f"{header} {place.name}".strip() if header else place.name)
+                custom = (getattr(rsp, 'announcement_text', None) or '').strip()
+                if custom:
+                    announcement_text = custom
+                elif header:
+                    name = (place.name or '').strip()
+                    announcement_text = (header.replace('$x', name).replace('$X', name).strip() or name)[:500]
+                else:
+                    announcement_text = (place.name or '')[:500]
             else:
                 announcement_text = ''
             pickups = []
