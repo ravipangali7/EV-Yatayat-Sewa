@@ -223,28 +223,12 @@ def route_list_post_view(request):
 def route_detail_get_view(request, pk):
     """Retrieve a single route"""
     try:
-        route = Route.objects.select_related('start_point', 'end_point').prefetch_related('stop_points').get(pk=pk)
+        route = Route.objects.select_related('start_point', 'end_point').prefetch_related('stop_points__place').get(pk=pk)
     except Route.DoesNotExist:
         return Response({'error': 'Route not found'}, status=status.HTTP_404_NOT_FOUND)
     
-    # Build stop_points response
-    stop_points = []
-    for sp in route.stop_points.all():
-        stop_points.append({
-            'id': str(sp.id),
-            'route': str(sp.route.id),
-            'place': str(sp.place.id),
-            'place_details': {
-                'id': str(sp.place.id),
-                'name': sp.place.name,
-                'code': sp.place.code,
-                'latitude': str(sp.place.latitude),
-                'longitude': str(sp.place.longitude),
-            },
-            'order': sp.order,
-            'created_at': sp.created_at.isoformat(),
-            'updated_at': sp.updated_at.isoformat(),
-        })
+    # Build stop_points response (include announcement_text for edit form)
+    stop_points = [_stop_point_to_dict(sp) for sp in route.stop_points.all()]
     
     # Return data without serializer
     return Response({
