@@ -28,6 +28,7 @@ class RouteStopPointSerializer(serializers.ModelSerializer):
         model = RouteStopPoint
         fields = [
             'id', 'route', 'place', 'place_details', 'order',
+            'announcement_text',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']

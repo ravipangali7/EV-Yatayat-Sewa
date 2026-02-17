@@ -22,6 +22,7 @@ def _location_to_response(loc):
         'latitude': str(loc.latitude),
         'longitude': str(loc.longitude),
         'speed': str(loc.speed) if loc.speed is not None else None,
+        'course': str(loc.course) if getattr(loc, 'course', None) is not None else None,
         'created_at': loc.created_at.isoformat(),
         'updated_at': loc.updated_at.isoformat(),
     }
@@ -36,6 +37,7 @@ def location_list_post_view(request):
     latitude = request.POST.get('latitude') or request.data.get('latitude')
     longitude = request.POST.get('longitude') or request.data.get('longitude')
     speed = request.POST.get('speed') or request.data.get('speed')
+    course = request.POST.get('course') or request.data.get('course')
 
     if not vehicle_id or not latitude or not longitude:
         return Response({'error': 'vehicle, latitude and longitude are required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -58,6 +60,7 @@ def location_list_post_view(request):
         latitude=Decimal(str(latitude)),
         longitude=Decimal(str(longitude)),
         speed=Decimal(str(speed)) if speed is not None else None,
+        course=Decimal(str(course)) if course is not None else None,
     )
     return Response(_location_to_response(loc), status=status.HTTP_201_CREATED)
 

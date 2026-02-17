@@ -4,6 +4,39 @@ from rest_framework import status
 from django.db.models import Q
 import json
 from ..models import Route, RouteStopPoint, Place
+from core.models import SuperSetting
+
+
+def _default_announcement_text(place):
+    """Return stop_point_announcement_header + ' ' + place.name from latest SuperSetting, or place.name."""
+    try:
+        ss = SuperSetting.objects.latest('created_at')
+        header = (getattr(ss, 'stop_point_announcement_header', None) or '').strip()
+        if header:
+            return f"{header} {place.name}".strip()[:500]
+    except (SuperSetting.DoesNotExist, (TypeError, ValueError)):
+        pass
+    return (place.name or '')[:500]
+
+
+def _stop_point_to_dict(sp):
+    """Build stop point dict for API response including announcement_text."""
+    return {
+        'id': str(sp.id),
+        'route': str(sp.route.id),
+        'place': str(sp.place.id),
+        'place_details': {
+            'id': str(sp.place.id),
+            'name': sp.place.name,
+            'code': sp.place.code,
+            'latitude': str(sp.place.latitude),
+            'longitude': str(sp.place.longitude),
+        },
+        'order': sp.order,
+        'announcement_text': getattr(sp, 'announcement_text', '') or '',
+        'created_at': sp.created_at.isoformat(),
+        'updated_at': sp.updated_at.isoformat(),
+    }
 
 
 @api_view(['GET'])
@@ -47,23 +80,7 @@ def route_list_get_view(request):
     results = []
     for route in routes:
         # Build stop_points array
-        stop_points = []
-        for sp in route.stop_points.all():
-            stop_points.append({
-                'id': str(sp.id),
-                'route': str(sp.route.id),
-                'place': str(sp.place.id),
-                'place_details': {
-                    'id': str(sp.place.id),
-                    'name': sp.place.name,
-                    'code': sp.place.code,
-                    'latitude': str(sp.place.latitude),
-                    'longitude': str(sp.place.longitude),
-                },
-                'order': sp.order,
-                'created_at': sp.created_at.isoformat(),
-                'updated_at': sp.updated_at.isoformat(),
-            })
+        stop_points = [_stop_point_to_dict(sp) for sp in route.stop_points.all()]
         
         results.append({
             'id': str(route.id),
@@ -154,36 +171,24 @@ def route_list_post_view(request):
             if place_id:
                 try:
                     place = Place.objects.get(pk=place_id)
+                    ann = (sp_data.get('announcement_text') or '').strip()
+                    if not ann:
+                        ann = _default_announcement_text(place)
                     RouteStopPoint.objects.create(
                         route=route,
                         place=place,
-                        order=order
+                        order=order,
+                        announcement_text=ann[:500],
                     )
                 except Place.DoesNotExist:
                     pass  # Skip invalid place
     
     # Reload route with stop points
     route.refresh_from_db()
-    route = Route.objects.select_related('start_point', 'end_point').prefetch_related('stop_points').get(pk=route.id)
+    route = Route.objects.select_related('start_point', 'end_point').prefetch_related('stop_points__place').get(pk=route.id)
     
     # Build stop_points response
-    stop_points = []
-    for sp in route.stop_points.all():
-        stop_points.append({
-            'id': str(sp.id),
-            'route': str(sp.route.id),
-            'place': str(sp.place.id),
-            'place_details': {
-                'id': str(sp.place.id),
-                'name': sp.place.name,
-                'code': sp.place.code,
-                'latitude': str(sp.place.latitude),
-                'longitude': str(sp.place.longitude),
-            },
-            'order': sp.order,
-            'created_at': sp.created_at.isoformat(),
-            'updated_at': sp.updated_at.isoformat(),
-        })
+    stop_points = [_stop_point_to_dict(sp) for sp in route.stop_points.all()]
     
     # Return response
     return Response({
@@ -324,36 +329,24 @@ def route_detail_post_view(request, pk):
                 if place_id:
                     try:
                         place = Place.objects.get(pk=place_id)
+                        ann = (sp_data.get('announcement_text') or '').strip()
+                        if not ann:
+                            ann = _default_announcement_text(place)
                         RouteStopPoint.objects.create(
                             route=route,
                             place=place,
-                            order=order
+                            order=order,
+                            announcement_text=ann[:500],
                         )
                     except Place.DoesNotExist:
                         pass  # Skip invalid place
     
     # Reload route with stop points
     route.refresh_from_db()
-    route = Route.objects.select_related('start_point', 'end_point').prefetch_related('stop_points').get(pk=route.id)
+    route = Route.objects.select_related('start_point', 'end_point').prefetch_related('stop_points__place').get(pk=route.id)
     
     # Build stop_points response
-    stop_points = []
-    for sp in route.stop_points.all():
-        stop_points.append({
-            'id': str(sp.id),
-            'route': str(sp.route.id),
-            'place': str(sp.place.id),
-            'place_details': {
-                'id': str(sp.place.id),
-                'name': sp.place.name,
-                'code': sp.place.code,
-                'latitude': str(sp.place.latitude),
-                'longitude': str(sp.place.longitude),
-            },
-            'order': sp.order,
-            'created_at': sp.created_at.isoformat(),
-            'updated_at': sp.updated_at.isoformat(),
-        })
+    stop_points = [_stop_point_to_dict(sp) for sp in route.stop_points.all()]
     
     # Return updated data
     return Response({
@@ -405,25 +398,7 @@ def route_stop_point_list_get_view(request, route_id):
     stop_points = RouteStopPoint.objects.filter(route=route).select_related('place').order_by('order')
     
     # Return data without serializer
-    results = []
-    for sp in stop_points:
-        results.append({
-            'id': str(sp.id),
-            'route': str(sp.route.id),
-            'place': str(sp.place.id),
-            'place_details': {
-                'id': str(sp.place.id),
-                'name': sp.place.name,
-                'code': sp.place.code,
-                'latitude': str(sp.place.latitude),
-                'longitude': str(sp.place.longitude),
-            },
-            'order': sp.order,
-            'created_at': sp.created_at.isoformat(),
-            'updated_at': sp.updated_at.isoformat(),
-        })
-    
-    return Response(results)
+    return Response([_stop_point_to_dict(sp) for sp in stop_points])
 
 
 @api_view(['POST'])
@@ -451,28 +426,19 @@ def route_stop_point_list_post_view(request, route_id):
     except (ValueError, TypeError):
         order = 0
     
+    ann = (request.POST.get('announcement_text') or request.data.get('announcement_text') or '').strip()
+    if not ann:
+        ann = _default_announcement_text(place)
+    
     # Create stop point directly without serializer
     stop_point = RouteStopPoint.objects.create(
         route=route,
         place=place,
-        order=order
+        order=order,
+        announcement_text=ann[:500],
     )
     
-    return Response({
-        'id': str(stop_point.id),
-        'route': str(stop_point.route.id),
-        'place': str(stop_point.place.id),
-        'place_details': {
-            'id': str(stop_point.place.id),
-            'name': stop_point.place.name,
-            'code': stop_point.place.code,
-            'latitude': str(stop_point.place.latitude),
-            'longitude': str(stop_point.place.longitude),
-        },
-        'order': stop_point.order,
-        'created_at': stop_point.created_at.isoformat(),
-        'updated_at': stop_point.updated_at.isoformat(),
-    }, status=status.HTTP_201_CREATED)
+    return Response(_stop_point_to_dict(stop_point), status=status.HTTP_201_CREATED)
 
 
 @api_view(['GET'])
@@ -483,21 +449,7 @@ def route_stop_point_detail_get_view(request, route_id, pk):
     except RouteStopPoint.DoesNotExist:
         return Response({'error': 'Stop point not found'}, status=status.HTTP_404_NOT_FOUND)
     
-    return Response({
-        'id': str(stop_point.id),
-        'route': str(stop_point.route.id),
-        'place': str(stop_point.place.id),
-        'place_details': {
-            'id': str(stop_point.place.id),
-            'name': stop_point.place.name,
-            'code': stop_point.place.code,
-            'latitude': str(stop_point.place.latitude),
-            'longitude': str(stop_point.place.longitude),
-        },
-        'order': stop_point.order,
-        'created_at': stop_point.created_at.isoformat(),
-        'updated_at': stop_point.updated_at.isoformat(),
-    })
+    return Response(_stop_point_to_dict(stop_point))
 
 
 @api_view(['POST'])
@@ -524,23 +476,15 @@ def route_stop_point_detail_post_view(request, route_id, pk):
         except (ValueError, TypeError):
             return Response({'error': 'Invalid order value'}, status=status.HTTP_400_BAD_REQUEST)
     
+    if 'announcement_text' in request.POST or 'announcement_text' in request.data:
+        ann = (request.POST.get('announcement_text') or request.data.get('announcement_text') or '').strip()
+        if not ann:
+            ann = _default_announcement_text(stop_point.place)
+        stop_point.announcement_text = ann[:500]
+    
     stop_point.save()
     
-    return Response({
-        'id': str(stop_point.id),
-        'route': str(stop_point.route.id),
-        'place': str(stop_point.place.id),
-        'place_details': {
-            'id': str(stop_point.place.id),
-            'name': stop_point.place.name,
-            'code': stop_point.place.code,
-            'latitude': str(stop_point.place.latitude),
-            'longitude': str(stop_point.place.longitude),
-        },
-        'order': stop_point.order,
-        'created_at': stop_point.created_at.isoformat(),
-        'updated_at': stop_point.updated_at.isoformat(),
-    })
+    return Response(_stop_point_to_dict(stop_point))
 
 
 @api_view(['GET'])

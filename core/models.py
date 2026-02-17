@@ -66,6 +66,7 @@ class SuperSetting(models.Model):
     point_cover_radius = models.DecimalField(max_digits=10, decimal_places=4, default=0.5, null=True, blank=True)  # km radius for at stop/start
     minute_coverage_schedule = models.IntegerField(default=60, null=True, blank=True)  # minutes before/after schedule time for scheduled start
     seat_layout = models.JSONField(default=list, blank=True)  # e.g. ["x","-","-","y",":", ...]
+    stop_point_announcement_header = models.CharField(max_length=255, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
     updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
     

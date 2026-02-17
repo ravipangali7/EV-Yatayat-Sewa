@@ -33,6 +33,7 @@ def super_setting_list_get_view(request):
             'point_cover_radius': str(setting.point_cover_radius) if setting.point_cover_radius is not None else None,
             'minute_coverage_schedule': setting.minute_coverage_schedule,
             'seat_layout': getattr(setting, 'seat_layout', []) or [],
+            'stop_point_announcement_header': getattr(setting, 'stop_point_announcement_header', '') or '',
             'created_at': setting.created_at.isoformat(),
             'updated_at': setting.updated_at.isoformat(),
         })
@@ -88,6 +89,8 @@ def super_setting_list_post_view(request):
     if not isinstance(seat_layout, list):
         seat_layout = []
     
+    stop_point_announcement_header = (request.POST.get('stop_point_announcement_header') or request.data.get('stop_point_announcement_header') or '').strip()[:255]
+    
     # Create setting directly without serializer
     setting = SuperSetting.objects.create(
         per_km_charge=per_km_charge,
@@ -95,6 +98,7 @@ def super_setting_list_post_view(request):
         point_cover_radius=point_cover_radius,
         minute_coverage_schedule=minute_coverage_schedule,
         seat_layout=seat_layout,
+        stop_point_announcement_header=stop_point_announcement_header,
     )
     
     # Return response
@@ -105,6 +109,7 @@ def super_setting_list_post_view(request):
         'point_cover_radius': str(setting.point_cover_radius) if setting.point_cover_radius is not None else None,
         'minute_coverage_schedule': setting.minute_coverage_schedule,
         'seat_layout': setting.seat_layout,
+        'stop_point_announcement_header': getattr(setting, 'stop_point_announcement_header', '') or '',
         'created_at': setting.created_at.isoformat(),
         'updated_at': setting.updated_at.isoformat(),
     }, status=status.HTTP_201_CREATED)
@@ -126,6 +131,7 @@ def super_setting_detail_get_view(request, pk):
         'point_cover_radius': str(setting.point_cover_radius) if setting.point_cover_radius is not None else None,
         'minute_coverage_schedule': setting.minute_coverage_schedule,
         'seat_layout': getattr(setting, 'seat_layout', []) or [],
+        'stop_point_announcement_header': getattr(setting, 'stop_point_announcement_header', '') or '',
         'created_at': setting.created_at.isoformat(),
         'updated_at': setting.updated_at.isoformat(),
     })
@@ -178,6 +184,10 @@ def super_setting_detail_post_view(request, pk):
             if isinstance(seat_layout, list):
                 setting.seat_layout = seat_layout
     
+    if 'stop_point_announcement_header' in request.POST or 'stop_point_announcement_header' in request.data:
+        val = request.POST.get('stop_point_announcement_header') or request.data.get('stop_point_announcement_header')
+        setting.stop_point_announcement_header = (val or '').strip()[:255]
+    
     setting.save()
     
     # Return updated data
@@ -188,6 +198,7 @@ def super_setting_detail_post_view(request, pk):
         'point_cover_radius': str(setting.point_cover_radius) if setting.point_cover_radius is not None else None,
         'minute_coverage_schedule': setting.minute_coverage_schedule,
         'seat_layout': getattr(setting, 'seat_layout', []) or [],
+        'stop_point_announcement_header': getattr(setting, 'stop_point_announcement_header', '') or '',
         'created_at': setting.created_at.isoformat(),
         'updated_at': setting.updated_at.isoformat(),
     })

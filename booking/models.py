@@ -49,6 +49,7 @@ class RouteStopPoint(models.Model):
     route = models.ForeignKey(Route, on_delete=models.CASCADE, related_name='stop_points')
     place = models.ForeignKey(Place, on_delete=models.CASCADE, related_name='route_stops')
     order = models.IntegerField()
+    announcement_text = models.CharField(max_length=500, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
     updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
     
@@ -210,6 +211,7 @@ class Location(models.Model):
     latitude = models.DecimalField(max_digits=20, decimal_places=16)
     longitude = models.DecimalField(max_digits=20, decimal_places=16)
     speed = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    course = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)  # direction in degrees 0-360
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
     updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
 

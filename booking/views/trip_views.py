@@ -364,6 +364,7 @@ def _location_to_response(loc):
         'latitude': str(loc.latitude),
         'longitude': str(loc.longitude),
         'speed': str(loc.speed) if loc.speed is not None else None,
+        'course': str(loc.course) if getattr(loc, 'course', None) is not None else None,
         'created_at': loc.created_at.isoformat(),
     }
 
@@ -378,6 +379,7 @@ def trip_detail_get_view(request, pk):
             'vehicle', 'driver', 'route', 'vehicle_schedule',
             'vehicle_schedule__vehicle', 'vehicle_schedule__route',
             'vehicle_schedule__route__start_point', 'vehicle_schedule__route__end_point',
+            'route__start_point', 'route__end_point',
         ).prefetch_related(
             'locations',
             'seat_bookings__user',
@@ -386,11 +388,32 @@ def trip_detail_get_view(request, pk):
             'vehicle_schedule__ticket_bookings',
             'vehicle_schedule__ticket_bookings__pickup_point',
             'vehicle_schedule__ticket_bookings__destination_point',
+            'route__stop_points__place',
         ).get(pk=pk)
     except Trip.DoesNotExist:
         return Response({'error': 'Trip not found'}, status=status.HTTP_404_NOT_FOUND)
 
     data = _trip_to_response(trip)
+
+    # Route with stop_points (place_id, order, announcement_text) for Flutter announcements
+    route = trip.route
+    if route:
+        stop_points = []
+        for rsp in route.stop_points.all().order_by('order'):
+            stop_points.append({
+                'place_id': str(rsp.place_id),
+                'order': rsp.order,
+                'announcement_text': getattr(rsp, 'announcement_text', '') or '',
+                'place_name': rsp.place.name if rsp.place else None,
+                'place_code': rsp.place.code if rsp.place else None,
+            })
+        data['route'] = {
+            'id': str(route.id),
+            'name': route.name,
+            'stop_points': stop_points,
+        }
+    else:
+        data['route'] = None
 
     # Locations for this trip (ordered by created_at for polyline/playback)
     locations = list(trip.locations.all().order_by('created_at'))
@@ -493,21 +516,28 @@ def trip_current_stop_view(request):
     try:
         ss = SuperSetting.objects.latest('created_at')
         radius_km = float(ss.point_cover_radius or 0.5)
+        header = (getattr(ss, 'stop_point_announcement_header', None) or '').strip()
     except (SuperSetting.DoesNotExist, (TypeError, ValueError)):
         radius_km = 0.5
+        header = ''
 
     route = trip.route
-    # Ordered points: start, then stop_points by order, then end
+
+    # Ordered points: (kind, place, route_stop_point or None for start/end)
     points = []
-    points.append(('start', route.start_point))
+    points.append(('start', route.start_point, None))
     for rsp in route.stop_points.all().order_by('order'):
-        points.append(('stop', rsp.place))
-    points.append(('end', route.end_point))
+        points.append(('stop', rsp.place, rsp))
+    points.append(('end', route.end_point, None))
 
     lat_f, lng_f = float(lat), float(lng)
-    for _kind, place in points:
+    for _kind, place, rsp in points:
         dist = haversine_km(lat_f, lng_f, float(place.latitude), float(place.longitude))
         if dist <= radius_km:
+            if rsp is not None:
+                announcement_text = (getattr(rsp, 'announcement_text', None) or '').strip() or (f"{header} {place.name}".strip() if header else place.name)
+            else:
+                announcement_text = ''
             pickups = []
             if trip.is_scheduled and trip.vehicle_schedule_id:
                 for vtb in trip.vehicle_schedule.ticket_bookings.filter(pickup_point_id=place.id).select_related('pickup_point'):
@@ -539,6 +569,7 @@ def trip_current_stop_view(request):
                 'at_stop': {
                     'place_id': str(place.id),
                     'name': place.name,
+                    'announcement_text': announcement_text[:500] if announcement_text else '',
                     'pickups': pickups,
                     'dropoffs': dropoffs,
                 },
