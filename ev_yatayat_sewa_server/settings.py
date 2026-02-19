@@ -156,12 +156,12 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # NCHL ConnectIPS Payment Gateway
-NCHL_MERCHANT_ID = int(os.environ.get('NCHL_MERCHANT_ID', '3856'))
-NCHL_APP_ID = os.environ.get('NCHL_APP_ID', 'MER-3856-APP-1')
-NCHL_APP_NAME = os.environ.get('NCHL_APP_NAME', 'LUNA G.P.S. AND RESEARCH CENTER')
-NCHL_APP_PASSWORD = os.environ.get('NCHL_APP_PASSWORD', 'L@Na@Ba35')
-NCHL_PFX_PATH = os.environ.get('NCHL_PFX_PATH', 'LUNAG.pfx')
-NCHL_PFX_PASSWORD = os.environ.get('NCHL_PFX_PASSWORD', 'LuCER3@55')
+NCHL_MERCHANT_ID = int(os.environ.get('NCHL_MERCHANT_ID', '4242'))
+NCHL_APP_ID = os.environ.get('NCHL_APP_ID', 'MER-4242-APP-1')
+NCHL_APP_NAME = os.environ.get('NCHL_APP_NAME', 'E.V.Yatayat Sewa Pvt.Ltd.')
+NCHL_APP_PASSWORD = os.environ.get('NCHL_APP_PASSWORD', 'Ev@yatayat#4321')
+NCHL_PFX_PATH = os.environ.get('NCHL_PFX_PATH', 'EVYATAYAT.pfx')
+NCHL_PFX_PASSWORD = os.environ.get('NCHL_PFX_PASSWORD', 'Evy@tay@t321')
 NCHL_BASE_URL = os.environ.get('NCHL_BASE_URL', 'https://login.connectips.com').rstrip('/')
 # Resolve PFX path: relative to BASE_DIR or absolute
 if not os.path.isabs(NCHL_PFX_PATH):
