@@ -105,9 +105,8 @@ def payment_initiate_view(request):
             frontend_url = request.build_absolute_uri('/').rstrip('/').replace('/api', '')
         except Exception:
             pass
-    callback_path = '/app/payment/callback'
-    success_url = f"{frontend_url}{callback_path}?txn_id={reference_id}&status=success"
-    failure_url = f"{frontend_url}{callback_path}?txn_id={reference_id}&status=failure"
+    success_url = f"{frontend_url}/payment/callback/success?TXNID={reference_id}"
+    failure_url = f"{frontend_url}/payment/callback/failure?TXNID={reference_id}"
 
     try:
         form_data = nchl_connectips.build_initiate_form_data(
