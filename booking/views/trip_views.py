@@ -395,17 +395,27 @@ def trip_detail_get_view(request, pk):
 
     data = _trip_to_response(trip)
 
-    # Route with stop_points (place_id, order, announcement_text) for Flutter announcements
+    # point_cover_radius_km for client-side geofence announcements
+    try:
+        ss = SuperSetting.objects.latest('created_at')
+        data['point_cover_radius_km'] = float(ss.point_cover_radius or 0.5)
+    except (SuperSetting.DoesNotExist, (TypeError, ValueError)):
+        data['point_cover_radius_km'] = 0.5
+
+    # Route with stop_points (place_id, order, announcement_text, lat/lng) for Flutter announcements
     route = trip.route
     if route:
         stop_points = []
         for rsp in route.stop_points.all().order_by('order'):
+            place = rsp.place
             stop_points.append({
                 'place_id': str(rsp.place_id),
                 'order': rsp.order,
                 'announcement_text': getattr(rsp, 'announcement_text', '') or '',
-                'place_name': rsp.place.name if rsp.place else None,
-                'place_code': rsp.place.code if rsp.place else None,
+                'place_name': place.name if place else None,
+                'place_code': place.code if place else None,
+                'latitude': str(place.latitude) if place and place.latitude is not None else None,
+                'longitude': str(place.longitude) if place and place.longitude is not None else None,
             })
         data['route'] = {
             'id': str(route.id),
