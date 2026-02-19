@@ -15,7 +15,7 @@ from ..services import nchl_connectips
 from booking.models import VehicleTicketBooking
 
 
-MIN_AMOUNT_NPR = 200
+MIN_AMOUNT_NPR = 10
 PURPOSE_WALLET_DEPOSIT = 'wallet_deposit'
 PURPOSE_CARD_TOPUP = 'card_topup'
 PURPOSE_VEHICLE_TICKET_BOOKING = 'vehicle_ticket_booking'
@@ -47,7 +47,7 @@ def _payment_transaction_to_response(pt):
 def payment_initiate_view(request):
     """
     Create PENDING PaymentTransaction and return form data for NCHL gateway.
-    Body: amount (NPR, min 200), remarks?, particulars?, purpose?, card_id?, vehicle_ticket_booking_id?
+    Body: amount (NPR, min 10), remarks?, particulars?, purpose?, card_id?, vehicle_ticket_booking_id?
     """
     data = request.data or request.POST
     amount = data.get('amount')
