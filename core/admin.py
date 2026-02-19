@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from .models import User, SuperSetting, Wallet, Transaction, Card
+from .models import User, SuperSetting, Wallet, Transaction, Card, PaymentTransaction
 
 
 @admin.register(User)
@@ -69,3 +69,14 @@ class CardAdmin(admin.ModelAdmin):
     search_fields = ('card_number', 'user__username', 'user__phone')
     readonly_fields = ('created_at', 'updated_at')
     raw_id_fields = ('user',)
+
+
+@admin.register(PaymentTransaction)
+class PaymentTransactionAdmin(admin.ModelAdmin):
+    """NCHL payment transaction admin"""
+    list_display = ('id', 'reference_id', 'user', 'amount', 'status', 'purpose', 'created_at', 'completed_at')
+    list_filter = ('status', 'purpose', 'created_at')
+    search_fields = ('reference_id', 'user__username', 'user__phone')
+    readonly_fields = ('created_at', 'updated_at', 'completed_at')
+    raw_id_fields = ('user', 'card', 'vehicle_ticket_booking')
+    list_select_related = ('user',)

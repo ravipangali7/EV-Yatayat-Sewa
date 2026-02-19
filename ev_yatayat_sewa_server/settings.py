@@ -154,3 +154,16 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# NCHL ConnectIPS Payment Gateway
+NCHL_MERCHANT_ID = int(os.environ.get('NCHL_MERCHANT_ID', '3856'))
+NCHL_APP_ID = os.environ.get('NCHL_APP_ID', 'MER-3856-APP-1')
+NCHL_APP_NAME = os.environ.get('NCHL_APP_NAME', 'LUNA G.P.S. AND RESEARCH CENTER')
+NCHL_APP_PASSWORD = os.environ.get('NCHL_APP_PASSWORD', 'L@Na@Ba35')
+NCHL_PFX_PATH = os.environ.get('NCHL_PFX_PATH', 'LUNAG.pfx')
+NCHL_PFX_PASSWORD = os.environ.get('NCHL_PFX_PASSWORD', 'LuCER3@55')
+NCHL_BASE_URL = os.environ.get('NCHL_BASE_URL', 'https://login.connectips.com').rstrip('/')
+# Resolve PFX path: relative to BASE_DIR or absolute
+if not os.path.isabs(NCHL_PFX_PATH):
+    NCHL_PFX_PATH = str(BASE_DIR / NCHL_PFX_PATH)
+FRONTEND_URL = os.environ.get('FRONTEND_URL', '').rstrip('/')

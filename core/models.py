@@ -157,6 +157,48 @@ class Card(models.Model):
         return f"Card {self.card_number} (Balance: {self.balance})"
 
 
+class PaymentTransaction(models.Model):
+    """NCHL ConnectIPS payment transaction (wallet deposit, card topup, ticket booking)."""
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('success', 'Success'),
+        ('failed', 'Failed'),
+    ]
+    PURPOSE_CHOICES = [
+        ('wallet_deposit', 'Wallet Deposit'),
+        ('card_topup', 'Card Topup'),
+        ('vehicle_ticket_booking', 'Vehicle Ticket Booking'),
+    ]
+    id = models.BigAutoField(primary_key=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='payment_transactions')
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    amount_paisa = models.IntegerField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    reference_id = models.CharField(max_length=64, unique=True, db_index=True)
+    connectips_txn_id = models.CharField(max_length=100, blank=True, null=True)
+    connectips_batch_id = models.CharField(max_length=100, blank=True, null=True)
+    error_message = models.TextField(blank=True, null=True)
+    purpose = models.CharField(max_length=32, choices=PURPOSE_CHOICES, default='wallet_deposit')
+    card = models.ForeignKey(Card, on_delete=models.SET_NULL, null=True, blank=True, related_name='payment_transactions')
+    vehicle_ticket_booking = models.ForeignKey(
+        'booking.VehicleTicketBooking', on_delete=models.SET_NULL, null=True, blank=True, related_name='payment_transactions'
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
+    updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'payment_transactions'
+        indexes = [
+            models.Index(fields=['user']),
+            models.Index(fields=['status']),
+            models.Index(fields=['purpose']),
+        ]
+
+    def __str__(self):
+        return f"Payment {self.reference_id} {self.amount} ({self.status})"
+
+
 class OTPVerification(models.Model):
     """OTP Verification model for password reset and phone verification"""
     id = models.BigAutoField(primary_key=True)

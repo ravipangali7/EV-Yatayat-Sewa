@@ -7,6 +7,7 @@ from .views import (
     super_setting_views,
     card_views,
     dashboard_views,
+    payment_views,
 )
 
 urlpatterns = [
@@ -60,4 +61,11 @@ urlpatterns = [
     path('super-settings/<int:pk>/', super_setting_views.super_setting_detail_get_view, name='super-setting-detail-get'),
     path('super-settings/<int:pk>/edit/', super_setting_views.super_setting_detail_post_view, name='super-setting-detail-post'),
     path('super-settings/<int:pk>/delete/', super_setting_views.super_setting_delete_get_view, name='super-setting-delete'),
+
+    # NCHL Payment endpoints
+    path('payment/initiate/', payment_views.payment_initiate_view, name='payment-initiate'),
+    path('payment/validate/', payment_views.payment_validate_view, name='payment-validate'),
+    path('payment/callback/', payment_views.payment_callback_get_view, name='payment-callback'),
+    path('payment/transactions/', payment_views.payment_transaction_list_view, name='payment-transaction-list'),
+    path('payment/transactions/<int:pk>/', payment_views.payment_transaction_detail_view, name='payment-transaction-detail'),
 ]
