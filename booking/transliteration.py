@@ -2,6 +2,7 @@
 Simple Devanagari (Nepali) to Roman transliteration for search matching.
 Maps common characters so that "राम" and "Ram" match.
 """
+import re
 
 # Devanagari consonants (with inherent 'a') and vowels -> Latin (ASCII, no diacritics)
 _DEVA_TO_ROMAN = {
@@ -80,11 +81,24 @@ def romanize(text: str) -> str:
 
 
 def normalize_phonetic(text: str) -> str:
-    """Romanize then lowercase and treat v/b as same (v -> b) for phonetic matching."""
+    """Romanize, lowercase, remove spaces, apply phonetic equivalences, then collapse repeated chars for flexible/voice matching."""
     if not text:
         return ""
     s = romanize(text).lower()
+    s = re.sub(r"\s+", "", s)  # space-insensitive: "sama kusi" -> "samakusi"
+    # Order: longer digraphs first
+    s = s.replace("sh", "s")
+    s = s.replace("kh", "k")
+    s = s.replace("gh", "g")
+    s = s.replace("ch", "c")
+    s = s.replace("th", "t")
+    s = s.replace("dh", "d")
+    s = s.replace("ph", "p")
+    s = s.replace("bh", "b")
+    s = s.replace("ng", "n")
     s = s.replace("v", "b")
+    s = s.replace("z", "j")
+    s = re.sub(r"(.)\1+", r"\1", s)  # collapse repeated chars (voice/typos): samakhusii -> samakhusi
     return s
 
 
@@ -97,7 +111,7 @@ def consonant_skeleton(text: str) -> str:
 
 
 def search_matches(name: str, query: str) -> bool:
-    """True if query matches name: direct, romanized, phonetic, or consonant skeleton."""
+    """True if query matches name: direct, romanized, phonetic, or consonant skeleton. Space-insensitive and sh/kh variants."""
     name = name or ""
     query = (query or "").strip()
     if not query:
@@ -105,6 +119,11 @@ def search_matches(name: str, query: str) -> bool:
     q_lower = query.lower()
     n_lower = name.lower()
     if q_lower in n_lower or n_lower in q_lower:
+        return True
+    # Space-insensitive direct match
+    n_no_space = "".join(n_lower.split())
+    q_no_space = "".join(q_lower.split())
+    if q_no_space in n_no_space or n_no_space in q_no_space:
         return True
     name_roman = romanize(name)
     query_roman = romanize(query)
