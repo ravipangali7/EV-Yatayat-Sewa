@@ -513,8 +513,9 @@ def trip_current_stop_view(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
     try:
-        trip = Trip.objects.select_related('route', 'route__start_point', 'route__end_point').prefetch_related(
+        trip = Trip.objects.select_related('route', 'route__start_point', 'route__end_point', 'vehicle').prefetch_related(
             'route__stop_points__place', 'vehicle_schedule__ticket_bookings__pickup_point',
+            'vehicle_schedule__ticket_bookings__destination_point', 'vehicle__seats',
         ).get(pk=trip_id)
     except Trip.DoesNotExist:
         return Response({'error': 'Trip not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -568,21 +569,52 @@ def trip_current_stop_view(request):
                         'seat': seat_str,
                     })
             dropoffs = []
-            if not trip.is_scheduled:
-                for sb in SeatBooking.objects.filter(
-                    trip=trip,
-                    destination_place_id=place.id,
-                    check_out_datetime__isnull=True,
-                ).select_related('vehicle_seat'):
-                    seat_label = f"{sb.vehicle_seat.side}{sb.vehicle_seat.number}"
-                    dropoffs.append({
-                        'booking_id': str(sb.id),
-                        'vehicle_seat_id': str(sb.vehicle_seat_id),
-                        'seat_label': seat_label,
-                        'name': sb.user.name if sb.user else 'Guest',
-                        'pnr': '',
-                        'trip_amount': str(sb.trip_amount) if sb.trip_amount is not None else '0',
-                    })
+            # All seat bookings (scheduled or not) whose destination is this stop and not yet checked out
+            for sb in SeatBooking.objects.filter(
+                trip=trip,
+                destination_place_id=place.id,
+                check_out_datetime__isnull=True,
+            ).select_related('vehicle_seat'):
+                seat_label = f"{sb.vehicle_seat.side}{sb.vehicle_seat.number}"
+                dropoffs.append({
+                    'booking_id': str(sb.id),
+                    'vehicle_seat_id': str(sb.vehicle_seat_id),
+                    'seat_label': seat_label,
+                    'name': sb.user.name if sb.user else 'Guest',
+                    'pnr': '',
+                    'trip_amount': str(sb.trip_amount) if sb.trip_amount is not None else '0',
+                })
+            # For scheduled trips, also include ticket dropoffs at this destination (in case no SeatBooking yet)
+            existing_seat_ids = {d['vehicle_seat_id'] for d in dropoffs}
+            if trip.is_scheduled and trip.vehicle_schedule_id and trip.vehicle_id:
+                vehicle_seat_by_key = {(vs.side, vs.number): vs for vs in trip.vehicle.seats.all()}
+                for vtb in trip.vehicle_schedule.ticket_bookings.filter(destination_point_id=place.id).select_related('destination_point'):
+                    seat_list = vtb.seat if isinstance(vtb.seat, list) else ([vtb.seat] if vtb.seat and isinstance(vtb.seat, dict) else [])
+                    for seat_item in seat_list:
+                        if not isinstance(seat_item, dict):
+                            continue
+                        side = str(seat_item.get('side', '')).strip()
+                        num = seat_item.get('number')
+                        if num is not None:
+                            try:
+                                num = int(num)
+                            except (TypeError, ValueError):
+                                continue
+                        else:
+                            continue
+                        vs = vehicle_seat_by_key.get((side, num))
+                        if vs is None or str(vs.id) in existing_seat_ids:
+                            continue
+                        existing_seat_ids.add(str(vs.id))
+                        seat_label = f"{side}{num}"
+                        dropoffs.append({
+                            'booking_id': f"ticket_{vtb.id}",
+                            'vehicle_seat_id': str(vs.id),
+                            'seat_label': seat_label,
+                            'name': vtb.name or 'Guest',
+                            'pnr': vtb.pnr or '',
+                            'trip_amount': str(vtb.price) if vtb.price is not None else '0',
+                        })
             return Response({
                 'at_stop': {
                     'place_id': str(place.id),

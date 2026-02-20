@@ -4,23 +4,34 @@ from rest_framework import status
 from django.db.models import Q
 from decimal import Decimal
 from ..models import Place
+from ..transliteration import romanize
 
 
 @api_view(['GET'])
 def place_list_get_view(request):
-    """List all places"""
+    """List all places. Search matches name/code/address and supports Nepali/English (e.g. Ram matches राम)."""
     # Get query parameters
-    search = request.query_params.get('search', '')
+    search = (request.query_params.get('search') or '').strip()
     
     # Build queryset
     queryset = Place.objects.all()
     
     if search:
+        # Direct match
         queryset = queryset.filter(
             Q(name__icontains=search) |
             Q(code__icontains=search) |
             Q(address__icontains=search)
         )
+        # Also match by romanized name (e.g. user types "Ram", place name is "राम")
+        search_roman = romanize(search)
+        if search_roman:
+            all_place_ids = set(queryset.values_list('id', flat=True))
+            for place in Place.objects.only('id', 'name').iterator(chunk_size=200):
+                name_roman = romanize(place.name or '')
+                if search_roman in name_roman or (search.lower() in (place.name or '').lower()):
+                    all_place_ids.add(place.id)
+            queryset = Place.objects.filter(id__in=all_place_ids)
     
     # Pagination
     page = int(request.query_params.get('page', 1))
