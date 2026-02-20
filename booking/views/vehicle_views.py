@@ -164,7 +164,7 @@ def vehicle_list_get_view(request):
         
         # Build seats
         seats = []
-        for seat in vehicle.seats.all():
+        for seat in vehicle.seats.all().order_by('side', 'number'):
             seats.append({
                 'id': str(seat.id),
                 'vehicle': str(seat.vehicle.id),
@@ -443,7 +443,7 @@ def vehicle_list_post_view(request):
         })
     
     seats = []
-    for seat in vehicle.seats.all():
+    for seat in vehicle.seats.all().order_by('side', 'number'):
         seats.append({
             'id': str(seat.id),
             'vehicle': str(seat.vehicle.id),
@@ -559,7 +559,7 @@ def vehicle_detail_get_view(request, pk):
         })
     
     seats = []
-    for seat in vehicle.seats.all():
+    for seat in vehicle.seats.all().order_by('side', 'number'):
         seats.append({
             'id': str(seat.id),
             'vehicle': str(seat.vehicle.id),
@@ -849,7 +849,7 @@ def vehicle_detail_post_view(request, pk):
         })
     
     seats = []
-    for seat in vehicle.seats.all():
+    for seat in vehicle.seats.all().order_by('side', 'number'):
         seats.append({
             'id': str(seat.id),
             'vehicle': str(seat.vehicle.id),
@@ -1282,7 +1282,7 @@ def vehicle_connect_view(request):
         })
     
     seats = []
-    for seat in vehicle.seats.all():
+    for seat in vehicle.seats.all().order_by('side', 'number'):
         seats.append({
             'id': str(seat.id),
             'vehicle': str(seat.vehicle.id),
@@ -1402,7 +1402,7 @@ def vehicle_set_active_route_view(request, vehicle_id):
                 'latitude': str(r.end_point.latitude), 'longitude': str(r.end_point.longitude)},
         })
     seats = []
-    for seat in vehicle.seats.all():
+    for seat in vehicle.seats.all().order_by('side', 'number'):
         seats.append({
             'id': str(seat.id), 'vehicle': str(seat.vehicle.id), 'side': seat.side,
             'number': seat.number, 'status': seat.status,
@@ -1502,7 +1502,7 @@ def vehicle_my_active_get_view(request):
         })
     
     seats = []
-    for seat in vehicle.seats.all():
+    for seat in vehicle.seats.all().order_by('side', 'number'):
         seats.append({
             'id': str(seat.id),
             'vehicle': str(seat.vehicle.id),
