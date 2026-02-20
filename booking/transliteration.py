@@ -79,6 +79,48 @@ def romanize(text: str) -> str:
     return "".join(out).lower()
 
 
+def normalize_phonetic(text: str) -> str:
+    """Romanize then lowercase and treat v/b as same (v -> b) for phonetic matching."""
+    if not text:
+        return ""
+    s = romanize(text).lower()
+    s = s.replace("v", "b")
+    return s
+
+
+def consonant_skeleton(text: str) -> str:
+    """From normalize_phonetic(text), remove vowels a,e,i,o,u for fuzzy match (e.g. bsundhra vs basundhara)."""
+    s = normalize_phonetic(text)
+    for v in "aeiou":
+        s = s.replace(v, "")
+    return s
+
+
+def search_matches(name: str, query: str) -> bool:
+    """True if query matches name: direct, romanized, phonetic, or consonant skeleton."""
+    name = name or ""
+    query = (query or "").strip()
+    if not query:
+        return True
+    q_lower = query.lower()
+    n_lower = name.lower()
+    if q_lower in n_lower or n_lower in q_lower:
+        return True
+    name_roman = romanize(name)
+    query_roman = romanize(query)
+    if query_roman and (query_roman in name_roman or name_roman in query_roman):
+        return True
+    name_phonetic = normalize_phonetic(name)
+    query_phonetic = normalize_phonetic(query)
+    if query_phonetic and (query_phonetic in name_phonetic or name_phonetic in query_phonetic):
+        return True
+    sk_query = consonant_skeleton(query)
+    sk_name = consonant_skeleton(name)
+    if len(sk_query) >= 2 and sk_query in sk_name:
+        return True
+    return False
+
+
 def search_normalize(query: str) -> str:
     """Normalize search query for matching: strip and lower. Romanize if it contains Devanagari."""
     if not query:
