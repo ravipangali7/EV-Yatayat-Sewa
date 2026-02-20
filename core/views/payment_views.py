@@ -19,6 +19,8 @@ MIN_AMOUNT_NPR = 10
 PURPOSE_WALLET_DEPOSIT = 'wallet_deposit'
 PURPOSE_CARD_TOPUP = 'card_topup'
 PURPOSE_VEHICLE_TICKET_BOOKING = 'vehicle_ticket_booking'
+PURPOSE_PAY_DUE = 'pay_due'
+VALID_PURPOSES = (PURPOSE_WALLET_DEPOSIT, PURPOSE_CARD_TOPUP, PURPOSE_VEHICLE_TICKET_BOOKING, PURPOSE_PAY_DUE)
 
 
 def _payment_transaction_to_response(pt):
@@ -67,8 +69,9 @@ def payment_initiate_view(request):
     purpose = (data.get('purpose') or PURPOSE_WALLET_DEPOSIT).strip()
     card_id = data.get('card_id')
     vehicle_ticket_booking_id = data.get('vehicle_ticket_booking_id')
+    return_to = (data.get('return_to') or '').strip()
 
-    if purpose not in (PURPOSE_WALLET_DEPOSIT, PURPOSE_CARD_TOPUP, PURPOSE_VEHICLE_TICKET_BOOKING):
+    if purpose not in VALID_PURPOSES:
         return Response({'error': 'Invalid purpose'}, status=status.HTTP_400_BAD_REQUEST)
     if purpose == PURPOSE_CARD_TOPUP and not card_id:
         return Response({'error': 'card_id required for card_topup'}, status=status.HTTP_400_BAD_REQUEST)
@@ -77,6 +80,15 @@ def payment_initiate_view(request):
             {'error': 'vehicle_ticket_booking_id required for vehicle_ticket_booking'},
             status=status.HTTP_400_BAD_REQUEST,
         )
+    if purpose == PURPOSE_PAY_DUE:
+        wallet = Wallet.objects.filter(user=request.user).first()
+        if not wallet:
+            return Response({'error': 'No wallet found'}, status=status.HTTP_400_BAD_REQUEST)
+        if amount > wallet.to_pay:
+            return Response(
+                {'error': f'Amount cannot exceed due amount (Rs. {wallet.to_pay})'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
     card = None
     if card_id:
@@ -107,6 +119,9 @@ def payment_initiate_view(request):
             pass
     success_url = f"{frontend_url}/payment/callback/success?TXNID={reference_id}"
     failure_url = f"{frontend_url}/payment/callback/failure?TXNID={reference_id}"
+    if return_to:
+        success_url += f"&return_to={return_to}"
+        failure_url += f"&return_to={return_to}"
 
     try:
         form_data = nchl_connectips.build_initiate_form_data(
@@ -204,16 +219,20 @@ def payment_validate_view(request):
     amount = pt.amount
 
     with db_transaction.atomic():
-        wallet.balance += amount
-        wallet.save(update_fields=['balance', 'updated_at'])
-        create_wallet_transaction(
-            wallet=wallet,
-            user=pt.user,
-            amount=amount,
-            type='add',
-            remarks='NCHL ConnectIPS payment',
-            status='success',
-        )
+        if pt.purpose == PURPOSE_PAY_DUE:
+            wallet.to_pay = max(Decimal('0'), wallet.to_pay - amount)
+            wallet.save(update_fields=['to_pay', 'updated_at'])
+        else:
+            wallet.balance += amount
+            wallet.save(update_fields=['balance', 'updated_at'])
+            create_wallet_transaction(
+                wallet=wallet,
+                user=pt.user,
+                amount=amount,
+                type='add',
+                remarks='NCHL ConnectIPS payment',
+                status='success',
+            )
 
         if pt.purpose == PURPOSE_CARD_TOPUP and pt.card_id:
             card = Card.objects.get(pk=pt.card_id)
