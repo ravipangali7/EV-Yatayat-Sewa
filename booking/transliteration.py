@@ -99,6 +99,10 @@ def normalize_phonetic(text: str) -> str:
     s = s.replace("w", "v")   # koteshwor <-> koteshwar (व as w)
     s = s.replace("v", "b")
     s = s.replace("z", "j")
+    # Vowel equivalences: chowk <-> chok, chauk <-> chok (चौक/चोक)
+    s = s.replace("au", "o")
+    s = s.replace("ow", "o")
+    s = s.replace("ou", "o")
     s = re.sub(r"(.)\1+", r"\1", s)  # collapse repeated chars (voice/typos): samakhusii -> samakhusi
     return s
 
