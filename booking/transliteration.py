@@ -96,6 +96,7 @@ def normalize_phonetic(text: str) -> str:
     s = s.replace("ph", "p")
     s = s.replace("bh", "b")
     s = s.replace("ng", "n")
+    s = s.replace("w", "v")   # koteshwor <-> koteshwar (व as w)
     s = s.replace("v", "b")
     s = s.replace("z", "j")
     s = re.sub(r"(.)\1+", r"\1", s)  # collapse repeated chars (voice/typos): samakhusii -> samakhusi
