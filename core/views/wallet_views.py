@@ -2,7 +2,9 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
-from django.db.models import Q
+from django.db.models import Q, F
+from django.db import transaction as db_transaction
+from django.utils import timezone
 from decimal import Decimal
 from ..models import Wallet, User
 from ..services.wallet_transaction import create_wallet_transaction
@@ -264,4 +266,98 @@ def wallet_my_deposit_view(request):
         'id': str(wallet.id),
         'balance': str(wallet.balance),
         'message': 'Deposit successful',
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def wallet_my_transfer_view(request):
+    """Transfer from current user's wallet to another user by phone or user id."""
+    data = request.data or request.POST
+    amount = data.get('amount')
+    recipient_phone = data.get('recipient_phone') or data.get('recipient_phone_number')
+    recipient_user_id = data.get('recipient_user_id')
+
+    if amount is None:
+        return Response({'error': 'amount is required'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        amount = Decimal(str(amount))
+    except (ValueError, TypeError):
+        return Response({'error': 'Invalid amount'}, status=status.HTTP_400_BAD_REQUEST)
+    if amount <= 0:
+        return Response({'error': 'Amount must be positive'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not recipient_phone and not recipient_user_id:
+        return Response(
+            {'error': 'recipient_phone or recipient_user_id is required'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    recipient = None
+    if recipient_user_id:
+        try:
+            recipient = User.objects.get(pk=recipient_user_id)
+        except (User.DoesNotExist, ValueError):
+            return Response({'error': 'Recipient user not found'}, status=status.HTTP_400_BAD_REQUEST)
+    else:
+        phone = (recipient_phone or '').strip()
+        if not phone:
+            return Response({'error': 'Recipient phone is required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            recipient = User.objects.get(phone=phone)
+        except User.DoesNotExist:
+            return Response({'error': 'No user found with this phone number'}, status=status.HTTP_404_NOT_FOUND)
+
+    if recipient.id == request.user.id:
+        return Response({'error': 'Cannot transfer to yourself'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        sender_wallet = Wallet.objects.get(user=request.user)
+    except Wallet.DoesNotExist:
+        return Response({'error': 'Wallet not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if sender_wallet.balance < amount:
+        return Response(
+            {'error': 'Insufficient balance', 'balance': str(sender_wallet.balance)},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    recipient_wallet, _ = Wallet.objects.get_or_create(
+        user=recipient,
+        defaults={'balance': 0, 'to_pay': 0, 'to_receive': 0},
+    )
+
+    with db_transaction.atomic():
+        create_wallet_transaction(
+            wallet=sender_wallet,
+            user=request.user,
+            amount=amount,
+            type='deducted',
+            remarks=f'Transfer to {recipient.name or recipient.phone}',
+            status='success',
+        )
+        create_wallet_transaction(
+            wallet=recipient_wallet,
+            user=recipient,
+            amount=amount,
+            type='add',
+            remarks=f'Transfer from {request.user.name or request.user.phone}',
+            status='success',
+        )
+        Wallet.objects.filter(pk=sender_wallet.pk).update(
+            balance=F('balance') - amount,
+            updated_at=timezone.now(),
+        )
+        Wallet.objects.filter(pk=recipient_wallet.pk).update(
+            balance=F('balance') + amount,
+            updated_at=timezone.now(),
+        )
+        sender_wallet.refresh_from_db()
+        recipient_wallet.refresh_from_db()
+
+    return Response({
+        'message': 'Transfer successful',
+        'balance': str(sender_wallet.balance),
+        'recipient_name': recipient.name or recipient.phone,
+        'recipient_phone': recipient.phone,
     })

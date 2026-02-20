@@ -38,6 +38,7 @@ urlpatterns = [
     path('wallets/<int:pk>/edit/', wallet_views.wallet_detail_post_view, name='wallet-detail-post'),
     path('wallets/<int:pk>/delete/', wallet_views.wallet_delete_get_view, name='wallet-delete'),
     path('wallets/my/deposit/', wallet_views.wallet_my_deposit_view, name='wallet-my-deposit'),
+    path('wallets/my/transfer/', wallet_views.wallet_my_transfer_view, name='wallet-my-transfer'),
     
     # Card endpoints
     path('cards/', card_views.card_list_get_view, name='card-list-get'),

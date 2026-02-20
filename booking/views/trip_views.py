@@ -581,6 +581,7 @@ def trip_current_stop_view(request):
                         'seat_label': seat_label,
                         'name': sb.user.name if sb.user else 'Guest',
                         'pnr': '',
+                        'trip_amount': str(sb.trip_amount) if sb.trip_amount is not None else '0',
                     })
             return Response({
                 'at_stop': {
