@@ -23,9 +23,10 @@ from core.views.media_views import serve_media
 urlpatterns = [
     # Media files - must be before admin URLs to bypass authentication
     re_path(r'^media/(?P<path>.*)$', serve_media, name='media'),
-    # Booking first so /api/trips/current-stop/ etc. are matched; then core (auth, users, wallets)
+    # Booking first so /api/trips/current-stop/ etc. are matched; then core (auth, users, wallets); then walkietalkie
     path('api/', include('booking.urls')),
     path('api/', include('core.urls')),
+    path('api/', include('walkietalkie.urls')),
 ]
 
 urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
