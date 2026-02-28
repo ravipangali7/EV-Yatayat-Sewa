@@ -182,7 +182,4 @@ if not os.path.isabs(NCHL_PFX_PATH):
 FRONTEND_URL = os.environ.get('FRONTEND_URL', '').rstrip('/')
 
 # Walkie-Talkie: directory where Node saves recording files (same as Node RECORDINGS_PATH in production)
-WALKIETALKIE_RECORDINGS_DIR = os.environ.get(
-    'WALKIETALKIE_RECORDINGS_DIR',
-    os.path.join(BASE_DIR, 'walkietalkie_recordings'),
-)
+WALKIETALKIE_RECORDINGS_DIR = '/home/luna/apps/EV-Yatayat-Sewa-Node/recordings'
