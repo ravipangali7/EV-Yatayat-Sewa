@@ -6,6 +6,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.authtoken.models import Token
 
+from core.models import User
 from .models import WalkieTalkieGroup, WalkieTalkieGroupMember, WalkieTalkieRecording
 from .serializers import (
     WalkieTalkieGroupSerializer,
@@ -74,12 +75,36 @@ def validate_token_view(request):
         WalkieTalkieGroupMember.objects.filter(user=user)
         .values_list('group_id', flat=True)
     )
+    group_ids = [str(gid) for gid in group_ids]
+    if getattr(user, 'is_driver', False):
+        group_ids.append(f'direct:{user.id}')
     return Response({
         'user_id': user.id,
         'username': user.username,
         'name': getattr(user, 'name', None) or user.username,
-        'group_ids': [str(gid) for gid in group_ids],
+        'group_ids': group_ids,
+        'is_superuser': getattr(user, 'is_superuser', False),
     })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def drivers_list_view(request):
+    """List drivers for superuser (for direct PTT)."""
+    if not getattr(request.user, 'is_superuser', False):
+        return Response({'detail': 'Superuser only.'}, status=status.HTTP_403_FORBIDDEN)
+    drivers = User.objects.filter(is_driver=True).order_by('name', 'username')
+    out = []
+    for u in drivers:
+        avatar = None
+        if getattr(u, 'profile_picture', None) and u.profile_picture:
+            avatar = request.build_absolute_uri(u.profile_picture.url)
+        out.append({
+            'id': u.id,
+            'name': getattr(u, 'name', None) or u.username,
+            'avatar': avatar,
+        })
+    return Response(out)
 
 
 @api_view(['GET', 'POST'])
@@ -100,7 +125,7 @@ def recording_list_create_view(request):
         if user_id:
             qs = qs.filter(user_id=user_id)
         qs = qs.order_by('-started_at')[:100]
-        serializer = WalkieTalkieRecordingSerializer(qs, many=True)
+        serializer = WalkieTalkieRecordingSerializer(qs, many=True, context={'request': request})
         return Response(serializer.data)
 
     # POST: create recording

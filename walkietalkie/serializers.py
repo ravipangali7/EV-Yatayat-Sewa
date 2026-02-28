@@ -27,14 +27,34 @@ class WalkieTalkieGroupMemberSerializer(serializers.ModelSerializer):
 
 
 class WalkieTalkieRecordingSerializer(serializers.ModelSerializer):
-    """Create/list recording metadata."""
+    """Create/list recording metadata (with user_name and user_avatar for list)."""
+    user_name = serializers.SerializerMethodField()
+    user_avatar = serializers.SerializerMethodField()
+
     class Meta:
         model = WalkieTalkieRecording
         fields = (
-            'id', 'group', 'user', 'started_at', 'ended_at',
-            'file_path', 'storage_key', 'duration_seconds', 'file_size_bytes', 'created_at'
+            'id', 'group', 'user', 'user_name', 'user_avatar',
+            'started_at', 'ended_at', 'file_path', 'storage_key',
+            'duration_seconds', 'file_size_bytes', 'created_at'
         )
         read_only_fields = ('id', 'created_at')
+
+    def get_user_name(self, obj):
+        if not obj.user:
+            return None
+        return getattr(obj.user, 'name', None) or getattr(obj.user, 'username', None) or f'User #{obj.user.id}'
+
+    def get_user_avatar(self, obj):
+        if not obj.user:
+            return None
+        pic = getattr(obj.user, 'profile_picture', None)
+        if not pic:
+            return None
+        request = self.context.get('request')
+        if request:
+            return request.build_absolute_uri(pic.url)
+        return pic.url if pic else None
 
 
 class WalkieTalkieRecordingCreateSerializer(serializers.Serializer):
