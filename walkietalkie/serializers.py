@@ -3,6 +3,14 @@ from .models import WalkieTalkieGroup, WalkieTalkieGroupMember, WalkieTalkieReco
 from django.conf import settings
 
 
+class ISO8601DateTimeField(serializers.DateTimeField):
+    """Accepts ISO 8601 strings with 'Z' or '+00:00' for UTC."""
+    def to_internal_value(self, value):
+        if isinstance(value, str) and value.strip().endswith('Z'):
+            value = value.strip().replace('Z', '+00:00')
+        return super().to_internal_value(value)
+
+
 class WalkieTalkieGroupSerializer(serializers.ModelSerializer):
     """List groups (with optional member count)."""
     member_count = serializers.SerializerMethodField()
@@ -58,13 +66,13 @@ class WalkieTalkieRecordingSerializer(serializers.ModelSerializer):
 
 
 class WalkieTalkieRecordingCreateSerializer(serializers.Serializer):
-    """Payload for Node to create a recording (group_id, user_id, etc.)."""
+    """Payload for Node to create a recording (group_id, user_id, etc.). Accepts ISO 8601 datetimes (with Z or +00:00)."""
     group_id = serializers.IntegerField()
     user_id = serializers.IntegerField()
-    started_at = serializers.DateTimeField()
-    ended_at = serializers.DateTimeField()
-    file_path = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    storage_key = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    started_at = ISO8601DateTimeField()
+    ended_at = ISO8601DateTimeField()
+    file_path = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=1024)
+    storage_key = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=1024)
     duration_seconds = serializers.FloatField(required=False, allow_null=True)
     file_size_bytes = serializers.IntegerField(required=False, allow_null=True)
     sample_rate = serializers.IntegerField(required=False, allow_null=True)
