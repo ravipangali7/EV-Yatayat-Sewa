@@ -75,7 +75,14 @@ REST_FRAMEWORK = {
         'rest_framework.parsers.FormParser',
     ],
 }
-CORS_ALLOW_ALL_ORIGINS = True
+# Explicit CORS origins so API works from frontend origin (521 is infra; when Django responds, headers are sent)
+CORS_ALLOWED_ORIGINS = [
+    'https://evyatayatsewa.com',
+    'https://www.evyatayatsewa.com',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+]
+CORS_ALLOW_ALL_ORIGINS = False
 
 ROOT_URLCONF = 'ev_yatayat_sewa_server.urls'
 
