@@ -19,17 +19,20 @@ from .serializers import (
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def group_list_view(request):
-    """List groups the current user is a member of. Returns a JSON array of { id, name, created_at, member_count }."""
-    memberships = (
-        WalkieTalkieGroupMember.objects.filter(user=request.user)
-        .select_related('group')
-        .order_by('group__name')
-    )
-    groups = [m.group for m in memberships]
+    """List groups for the current user. Staff see all groups; others see only groups they are a member of."""
+    if getattr(request.user, 'is_staff', False):
+        groups = list(WalkieTalkieGroup.objects.all().order_by('name'))
+    else:
+        memberships = (
+            WalkieTalkieGroupMember.objects.filter(user=request.user)
+            .select_related('group')
+            .order_by('group__name')
+        )
+        groups = [m.group for m in memberships]
     for g in groups:
         g._member_count = g.members.count()
     serializer = WalkieTalkieGroupSerializer(groups, many=True)
-    data = list(serializer.data)  # ensure always a list
+    data = list(serializer.data)
     return Response(data)
 
 
@@ -76,11 +79,14 @@ def validate_token_view(request):
     user, err = _get_user_from_token(token_key)
     if err:
         return err
-    group_ids = list(
-        WalkieTalkieGroupMember.objects.filter(user=user)
-        .values_list('group_id', flat=True)
-    )
-    group_ids = [str(gid) for gid in group_ids]
+    if getattr(user, 'is_staff', False):
+        group_ids = [str(g['id']) for g in WalkieTalkieGroup.objects.all().values('id')]
+    else:
+        group_ids = list(
+            WalkieTalkieGroupMember.objects.filter(user=user)
+            .values_list('group_id', flat=True)
+        )
+        group_ids = [str(gid) for gid in group_ids]
     if getattr(user, 'is_driver', False):
         group_ids.append(f'direct:{user.id}')
     return Response({
