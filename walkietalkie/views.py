@@ -126,9 +126,12 @@ def recording_list_create_view(request):
     POST: Create recording metadata. Called by Node after saving a recording file.
     """
     if request.method == 'GET':
-        qs = WalkieTalkieRecording.objects.filter(
-            group__members__user=request.user
-        ).select_related('group', 'user').distinct()
+        if getattr(request.user, 'is_staff', False):
+            qs = WalkieTalkieRecording.objects.all().select_related('group', 'user')
+        else:
+            qs = WalkieTalkieRecording.objects.filter(
+                group__members__user=request.user
+            ).select_related('group', 'user').distinct()
         group_id = request.query_params.get('group_id')
         if group_id:
             qs = qs.filter(group_id=group_id)
