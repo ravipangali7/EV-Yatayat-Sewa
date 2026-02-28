@@ -19,13 +19,18 @@ from .serializers import (
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def group_list_view(request):
-    """List groups the current user is a member of."""
-    memberships = WalkieTalkieGroupMember.objects.filter(user=request.user).select_related('group')
+    """List groups the current user is a member of. Returns a JSON array of { id, name, created_at, member_count }."""
+    memberships = (
+        WalkieTalkieGroupMember.objects.filter(user=request.user)
+        .select_related('group')
+        .order_by('group__name')
+    )
     groups = [m.group for m in memberships]
     for g in groups:
         g._member_count = g.members.count()
     serializer = WalkieTalkieGroupSerializer(groups, many=True)
-    return Response(serializer.data)
+    data = list(serializer.data)  # ensure always a list
+    return Response(data)
 
 
 @api_view(['GET'])
