@@ -159,19 +159,28 @@ def recording_list_create_view(request):
 @permission_classes([IsAuthenticated])
 def recording_play_view(request, pk):
     """Stream a recording file. User must be a member of the recording's group."""
+    from django.conf import settings
     try:
         rec = WalkieTalkieRecording.objects.select_related('group').get(pk=pk)
     except WalkieTalkieRecording.DoesNotExist:
         return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
     if not WalkieTalkieGroupMember.objects.filter(group=rec.group, user=request.user).exists():
         return Response({'detail': 'Not a member of this group.'}, status=status.HTTP_403_FORBIDDEN)
-    if rec.file_path and os.path.isfile(rec.file_path):
-        return FileResponse(
-            open(rec.file_path, 'rb'),
-            as_attachment=False,
-            content_type='application/octet-stream',
-            filename=os.path.basename(rec.file_path),
-        )
+    if rec.file_path:
+        base_dir = os.path.abspath(settings.WALKIETALKIE_RECORDINGS_DIR)
+        safe_path = os.path.normpath(rec.file_path.replace('\\', '/')).lstrip('/')
+        if '..' in safe_path or rec.file_path.startswith(('/', '\\')):
+            return Response({'detail': 'Invalid file path.'}, status=status.HTTP_400_BAD_REQUEST)
+        full_path = os.path.normpath(os.path.join(base_dir, safe_path))
+        if not full_path.startswith(base_dir):
+            return Response({'detail': 'Invalid file path.'}, status=status.HTTP_400_BAD_REQUEST)
+        if os.path.isfile(full_path):
+            return FileResponse(
+                open(full_path, 'rb'),
+                as_attachment=False,
+                content_type='application/octet-stream',
+                filename=os.path.basename(full_path),
+            )
     if rec.storage_key:
         return Response({'detail': 'Storage key playback not implemented.'}, status=status.HTTP_501_NOT_IMPLEMENTED)
     return Response({'detail': 'Recording file not found.'}, status=status.HTTP_404_NOT_FOUND)

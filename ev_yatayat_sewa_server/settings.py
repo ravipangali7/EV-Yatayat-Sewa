@@ -180,3 +180,9 @@ NCHL_BASE_URL = os.environ.get('NCHL_BASE_URL', 'https://login.connectips.com').
 if not os.path.isabs(NCHL_PFX_PATH):
     NCHL_PFX_PATH = str(BASE_DIR / NCHL_PFX_PATH)
 FRONTEND_URL = os.environ.get('FRONTEND_URL', '').rstrip('/')
+
+# Walkie-Talkie: directory where Node saves recording files (same as Node RECORDINGS_PATH in production)
+WALKIETALKIE_RECORDINGS_DIR = os.environ.get(
+    'WALKIETALKIE_RECORDINGS_DIR',
+    os.path.join(BASE_DIR, 'walkietalkie_recordings'),
+)
