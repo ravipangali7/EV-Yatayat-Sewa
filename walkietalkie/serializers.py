@@ -36,7 +36,7 @@ class WalkieTalkieRecordingSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'group', 'user', 'user_name', 'user_avatar',
             'started_at', 'ended_at', 'file_path', 'storage_key',
-            'duration_seconds', 'file_size_bytes', 'created_at'
+            'duration_seconds', 'file_size_bytes', 'sample_rate', 'created_at'
         )
         read_only_fields = ('id', 'created_at')
 
@@ -67,3 +67,4 @@ class WalkieTalkieRecordingCreateSerializer(serializers.Serializer):
     storage_key = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     duration_seconds = serializers.FloatField(required=False, allow_null=True)
     file_size_bytes = serializers.IntegerField(required=False, allow_null=True)
+    sample_rate = serializers.IntegerField(required=False, allow_null=True)

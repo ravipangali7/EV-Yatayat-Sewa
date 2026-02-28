@@ -65,6 +65,7 @@ class WalkieTalkieRecording(models.Model):
     storage_key = models.CharField(max_length=1024, blank=True, null=True)
     duration_seconds = models.FloatField(null=True, blank=True)
     file_size_bytes = models.BigIntegerField(null=True, blank=True)
+    sample_rate = models.IntegerField(null=True, blank=True, default=16000)
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
 
     class Meta:

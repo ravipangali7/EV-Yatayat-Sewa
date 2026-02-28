@@ -148,6 +148,7 @@ def recording_list_create_view(request):
         storage_key=data.get('storage_key') or None,
         duration_seconds=data.get('duration_seconds'),
         file_size_bytes=data.get('file_size_bytes'),
+        sample_rate=data.get('sample_rate'),
     )
     return Response(
         WalkieTalkieRecordingSerializer(rec).data,
