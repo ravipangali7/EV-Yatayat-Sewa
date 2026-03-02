@@ -14,7 +14,8 @@ from core.models import User, SuperSetting, Wallet, Transaction
 from core.services.wallet_transaction import create_wallet_transaction
 from ..serializers import SeatBookingSerializer
 
-DIRECT_BOOK_MAX_KM = 5  # Vehicle must be within 5 km for direct booking
+DIRECT_BOOK_MIN_KM = 5   # Vehicle must be beyond 5 km for direct booking
+DIRECT_BOOK_MAX_KM = 200 # Vehicle must be within 200 km for direct booking
 
 
 def haversine_distance(lat1, lon1, lat2, lon2):
@@ -546,7 +547,7 @@ def seat_booking_checkout_view(request):
 
 
 def _vehicle_direct_book_eligible(vehicle, user_lat, user_lng):
-    """Check if vehicle is eligible for direct booking: active_route, running trip, within 5 km."""
+    """Check if vehicle is eligible for direct booking: active_route, running trip, 5 km < distance <= 200 km."""
     if not vehicle.active_route_id:
         return False, 'Vehicle has no active route'
     active_trip = Trip.objects.filter(vehicle=vehicle, end_time__isnull=True).order_by('-start_time').first()
@@ -556,6 +557,8 @@ def _vehicle_direct_book_eligible(vehicle, user_lat, user_lng):
     if not last_loc:
         return False, 'Vehicle has no location'
     dist_km = float(haversine_distance(user_lat, user_lng, last_loc.latitude, last_loc.longitude))
+    if dist_km <= DIRECT_BOOK_MIN_KM:
+        return False, f'Vehicle must be more than {DIRECT_BOOK_MIN_KM} km away to book'
     if dist_km > DIRECT_BOOK_MAX_KM:
         return False, f'Vehicle is more than {DIRECT_BOOK_MAX_KM} km away'
     return True, None

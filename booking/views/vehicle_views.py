@@ -254,19 +254,25 @@ def vehicle_list_get_view(request):
     })
 
 
+# Bookable: vehicle must be above 5 km and within 200 km (active route + running trip)
+NEARBY_BOOK_MIN_KM = 5
+NEARBY_BOOK_MAX_KM = 200
+NEARBY_FETCH_RADIUS_KM = 200  # Show vehicles up to 200 km (e.g. Nepal radius)
+
+
 @api_view(['GET'])
 def vehicle_nearby_get_view(request):
     """List vehicles with last location within radius_km of (latitude, longitude).
-    Query params: latitude, longitude, radius_km (default 10), bookable_only (optional).
+    Query params: latitude, longitude, radius_km (default 200 for display), bookable_only (optional).
     Returns last_latitude, last_longitude, last_location_at, distance_km, can_book.
-    can_book = (distance_km <= 5 and active_route and running trip).
+    can_book = (5 < distance_km <= 200 and active_route and running trip).
     """
     lat = request.query_params.get('latitude')
     lng = request.query_params.get('longitude')
     try:
-        radius_km = float(request.query_params.get('radius_km', 10))
+        radius_km = float(request.query_params.get('radius_km', NEARBY_FETCH_RADIUS_KM))
     except (TypeError, ValueError):
-        radius_km = 10.0
+        radius_km = NEARBY_FETCH_RADIUS_KM
     bookable_only = request.query_params.get('bookable_only', '').lower() in ('true', '1', 'yes')
 
     if lat is None or lng is None:
@@ -300,7 +306,7 @@ def vehicle_nearby_get_view(request):
         if distance_km > radius_km:
             continue
         can_book = (
-            distance_km <= 5
+            NEARBY_BOOK_MIN_KM < distance_km <= NEARBY_BOOK_MAX_KM
             and vehicle.active_route_id is not None
             and vehicle.has_running_trip
         )
