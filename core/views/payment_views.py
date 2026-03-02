@@ -66,6 +66,8 @@ def payment_initiate_view(request):
         )
     remarks = (data.get('remarks') or '').strip()
     particulars = (data.get('particulars') or '').strip()
+    if not particulars:
+        particulars = remarks
     purpose = (data.get('purpose') or PURPOSE_WALLET_DEPOSIT).strip()
     card_id = data.get('card_id')
     vehicle_ticket_booking_id = data.get('vehicle_ticket_booking_id')
