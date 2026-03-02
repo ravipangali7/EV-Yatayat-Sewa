@@ -182,9 +182,8 @@ def verify_otp_view(request):
         otp_obj = serializer.validated_data['otp_obj']
         phone = serializer.validated_data['phone']
         
-        # Mark OTP as used
-        otp_obj.is_used = True
-        otp_obj.save()
+        # Do NOT mark OTP as used here - it is marked used only in change_password_view
+        # so that the reset_token remains valid for the change-password step.
         
         # Return reset token
         return Response({
