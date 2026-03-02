@@ -408,6 +408,11 @@ def trip_detail_get_view(request, pk):
         stop_points = []
         for rsp in route.stop_points.all().order_by('order'):
             place = rsp.place
+            has_destination_booking = SeatBooking.objects.filter(
+                trip=trip,
+                destination_place_id=place.id,
+                check_out_datetime__isnull=True,
+            ).exists()
             stop_points.append({
                 'place_id': str(rsp.place_id),
                 'order': rsp.order,
@@ -416,6 +421,7 @@ def trip_detail_get_view(request, pk):
                 'place_code': place.code if place else None,
                 'latitude': str(place.latitude) if place and place.latitude is not None else None,
                 'longitude': str(place.longitude) if place and place.longitude is not None else None,
+                'has_destination_booking': has_destination_booking,
             })
         data['route'] = {
             'id': str(route.id),
@@ -615,6 +621,11 @@ def trip_current_stop_view(request):
                             'pnr': vtb.pnr or '',
                             'trip_amount': str(vtb.price) if vtb.price is not None else '0',
                         })
+            has_destination_booking = SeatBooking.objects.filter(
+                trip=trip,
+                destination_place_id=place.id,
+                check_out_datetime__isnull=True,
+            ).exists()
             return Response({
                 'at_stop': {
                     'place_id': str(place.id),
@@ -622,6 +633,7 @@ def trip_current_stop_view(request):
                     'announcement_text': announcement_text[:500] if announcement_text else '',
                     'pickups': pickups,
                     'dropoffs': dropoffs,
+                    'has_destination_booking': has_destination_booking,
                 },
             }, status=status.HTTP_200_OK)
 
