@@ -37,6 +37,7 @@ urlpatterns = [
     path('vehicles/create/', vehicle_views.vehicle_list_post_view, name='vehicle-list-post'),
     path('vehicles/connect/', vehicle_views.vehicle_connect_view, name='vehicle-connect'),
     path('vehicles/my-active-vehicle/', vehicle_views.vehicle_my_active_get_view, name='vehicle-my-active'),
+    path('vehicles/nearby/', vehicle_views.vehicle_nearby_get_view, name='vehicle-nearby'),
     path('vehicles/<int:vehicle_id>/set-active-route/', vehicle_views.vehicle_set_active_route_view, name='vehicle-set-active-route'),
     path('vehicles/<int:pk>/', vehicle_views.vehicle_detail_get_view, name='vehicle-detail-get'),
     path('vehicles/<int:pk>/edit/', vehicle_views.vehicle_detail_post_view, name='vehicle-detail-post'),
@@ -65,6 +66,8 @@ urlpatterns = [
     
     # Seat Booking special endpoints
     path('seat-bookings/book/', seat_booking_views.seat_booking_create_view, name='seat-booking-create'),
+    path('seat-bookings/direct-book-preview/', seat_booking_views.direct_seat_booking_preview_view, name='direct-seat-booking-preview'),
+    path('seat-bookings/direct-book/', seat_booking_views.direct_seat_booking_create_view, name='direct-seat-booking-create'),
     path('seat-bookings/switch/', seat_booking_views.seat_booking_switch_view, name='seat-booking-switch'),
     path('seat-bookings/checkout/', seat_booking_views.seat_booking_checkout_view, name='seat-booking-checkout'),
     # Trip endpoints

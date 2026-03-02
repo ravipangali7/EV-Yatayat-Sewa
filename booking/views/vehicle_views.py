@@ -1,13 +1,24 @@
+import math
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
-from django.db.models import Q
+from django.db.models import Q, Subquery, OuterRef, Exists
 from decimal import Decimal
 import json
 from datetime import datetime
-from ..models import Vehicle, VehicleSeat, VehicleImage, Route, Trip
+from ..models import Vehicle, VehicleSeat, VehicleImage, Route, Trip, Location
 from core.models import User, SuperSetting
+
+
+def _haversine_km(lat1, lon1, lat2, lon2):
+    """Distance in km between two points (Haversine)."""
+    lat1, lon1, lat2, lon2 = map(math.radians, [float(lat1), float(lon1), float(lat2), float(lon2)])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    c = 2 * math.asin(math.sqrt(a))
+    return round(c * 6371, 4)
 
 
 def _parse_date(val):
@@ -241,6 +252,160 @@ def vehicle_list_get_view(request):
         'page': page,
         'per_page': per_page
     })
+
+
+@api_view(['GET'])
+def vehicle_nearby_get_view(request):
+    """List vehicles with last location within radius_km of (latitude, longitude).
+    Query params: latitude, longitude, radius_km (default 10), bookable_only (optional).
+    Returns last_latitude, last_longitude, last_location_at, distance_km, can_book.
+    can_book = (distance_km <= 5 and active_route and running trip).
+    """
+    lat = request.query_params.get('latitude')
+    lng = request.query_params.get('longitude')
+    try:
+        radius_km = float(request.query_params.get('radius_km', 10))
+    except (TypeError, ValueError):
+        radius_km = 10.0
+    bookable_only = request.query_params.get('bookable_only', '').lower() in ('true', '1', 'yes')
+
+    if lat is None or lng is None:
+        return Response({'error': 'latitude and longitude are required'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        user_lat = float(lat)
+        user_lng = float(lng)
+    except (TypeError, ValueError):
+        return Response({'error': 'Invalid latitude or longitude'}, status=status.HTTP_400_BAD_REQUEST)
+
+    latest_loc = Location.objects.filter(vehicle_id=OuterRef('pk')).order_by('-created_at')
+    has_running_trip = Trip.objects.filter(vehicle_id=OuterRef('pk'), end_time__isnull=True)
+    queryset = (
+        Vehicle.objects.prefetch_related(
+            'drivers', 'routes', 'seats', 'images',
+            'active_route__stop_points__place',
+        )
+        .select_related('active_route', 'active_route__start_point', 'active_route__end_point', 'active_driver')
+        .annotate(
+            last_lat=Subquery(latest_loc.values('latitude')[:1]),
+            last_lng=Subquery(latest_loc.values('longitude')[:1]),
+            last_location_at=Subquery(latest_loc.values('created_at')[:1]),
+            has_running_trip=Exists(has_running_trip),
+        )
+        .filter(last_lat__isnull=False, last_lng__isnull=False)
+    )
+
+    results = []
+    for vehicle in queryset:
+        distance_km = _haversine_km(user_lat, user_lng, float(vehicle.last_lat), float(vehicle.last_lng))
+        if distance_km > radius_km:
+            continue
+        can_book = (
+            distance_km <= 5
+            and vehicle.active_route_id is not None
+            and vehicle.has_running_trip
+        )
+        if bookable_only and not can_book:
+            continue
+
+        driver_details = []
+        for driver in vehicle.drivers.all():
+            driver_details.append({
+                'id': str(driver.id),
+                'username': driver.username,
+                'phone': driver.phone,
+                'email': driver.email or '',
+                'name': driver.name or '',
+                'is_driver': driver.is_driver,
+                'is_active': driver.is_active,
+            })
+        route_details = []
+        for route in vehicle.routes.all():
+            route_details.append({
+                'id': str(route.id),
+                'name': route.name,
+                'is_bidirectional': route.is_bidirectional,
+                'start_point_details': {
+                    'id': str(route.start_point.id),
+                    'name': route.start_point.name,
+                    'code': route.start_point.code,
+                    'latitude': str(route.start_point.latitude),
+                    'longitude': str(route.start_point.longitude),
+                },
+                'end_point_details': {
+                    'id': str(route.end_point.id),
+                    'name': route.end_point.name,
+                    'code': route.end_point.code,
+                    'latitude': str(route.end_point.latitude),
+                    'longitude': str(route.end_point.longitude),
+                },
+            })
+        seats = []
+        for seat in vehicle.seats.all().order_by('side', 'number'):
+            seats.append({
+                'id': str(seat.id),
+                'vehicle': str(seat.vehicle.id),
+                'side': seat.side,
+                'number': seat.number,
+                'status': seat.status,
+                'created_at': seat.created_at.isoformat(),
+                'updated_at': seat.updated_at.isoformat(),
+            })
+        images = []
+        for img in vehicle.images.all():
+            images.append({
+                'id': str(img.id),
+                'vehicle': str(img.vehicle.id),
+                'title': img.title or '',
+                'description': img.description or '',
+                'image': img.image.url if img.image else None,
+                'created_at': img.created_at.isoformat(),
+                'updated_at': img.updated_at.isoformat(),
+            })
+        active_driver_details = None
+        if vehicle.active_driver:
+            active_driver_details = {
+                'id': str(vehicle.active_driver.id),
+                'username': vehicle.active_driver.username,
+                'phone': vehicle.active_driver.phone,
+                'email': vehicle.active_driver.email or '',
+                'name': vehicle.active_driver.name or '',
+                'is_driver': vehicle.active_driver.is_driver,
+                'is_active': vehicle.active_driver.is_active,
+            }
+        active_route_details = _build_active_route_details(vehicle.active_route)
+
+        results.append({
+            'id': str(vehicle.id),
+            'imei': vehicle.imei or '',
+            'name': vehicle.name,
+            'vehicle_no': vehicle.vehicle_no,
+            'vehicle_type': vehicle.vehicle_type,
+            'odometer': str(vehicle.odometer),
+            'overspeed_limit': vehicle.overspeed_limit,
+            'description': vehicle.description or '',
+            'featured_image': vehicle.featured_image.url if vehicle.featured_image else None,
+            'drivers': [str(d.id) for d in vehicle.drivers.all()],
+            'driver_details': driver_details,
+            'active_driver': str(vehicle.active_driver.id) if vehicle.active_driver else None,
+            'active_driver_details': active_driver_details,
+            'routes': [str(r.id) for r in vehicle.routes.all()],
+            'route_details': route_details,
+            'active_route': str(vehicle.active_route.id) if vehicle.active_route else None,
+            'active_route_details': active_route_details,
+            'active_trip': _get_active_trip_for_vehicle(vehicle),
+            'is_active': vehicle.is_active,
+            'seat_layout': getattr(vehicle, 'seat_layout', []) or [],
+            'seats': seats,
+            'images': images,
+            'created_at': vehicle.created_at.isoformat(),
+            'updated_at': vehicle.updated_at.isoformat(),
+            'last_latitude': str(vehicle.last_lat),
+            'last_longitude': str(vehicle.last_lng),
+            'last_location_at': vehicle.last_location_at.isoformat() if vehicle.last_location_at else None,
+            'distance_km': round(distance_km, 2),
+            'can_book': can_book,
+        })
+    return Response({'results': results, 'count': len(results)})
 
 
 @api_view(['POST'])

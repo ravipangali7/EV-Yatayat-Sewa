@@ -3,14 +3,18 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Q
+from django.db import transaction as db_transaction
 from decimal import Decimal
 from datetime import datetime
 import math
 import json
 from django.db.models import F
-from ..models import Vehicle, VehicleSeat, SeatBooking, Trip, Place
+from ..models import Vehicle, VehicleSeat, SeatBooking, Trip, Place, Location
 from core.models import User, SuperSetting, Wallet, Transaction
+from core.services.wallet_transaction import create_wallet_transaction
 from ..serializers import SeatBookingSerializer
+
+DIRECT_BOOK_MAX_KM = 5  # Vehicle must be within 5 km for direct booking
 
 
 def haversine_distance(lat1, lon1, lat2, lon2):
@@ -539,3 +543,165 @@ def seat_booking_checkout_view(request):
 
     serializer = SeatBookingSerializer(booking)
     return Response(serializer.data)
+
+
+def _vehicle_direct_book_eligible(vehicle, user_lat, user_lng):
+    """Check if vehicle is eligible for direct booking: active_route, running trip, within 5 km."""
+    if not vehicle.active_route_id:
+        return False, 'Vehicle has no active route'
+    active_trip = Trip.objects.filter(vehicle=vehicle, end_time__isnull=True).order_by('-start_time').first()
+    if not active_trip:
+        return False, 'Vehicle has no running trip'
+    last_loc = Location.objects.filter(vehicle=vehicle).order_by('-created_at').first()
+    if not last_loc:
+        return False, 'Vehicle has no location'
+    dist_km = float(haversine_distance(user_lat, user_lng, last_loc.latitude, last_loc.longitude))
+    if dist_km > DIRECT_BOOK_MAX_KM:
+        return False, f'Vehicle is more than {DIRECT_BOOK_MAX_KM} km away'
+    return True, None
+
+
+@api_view(['GET'])
+def direct_seat_booking_preview_view(request):
+    """Preview estimated trip_amount for direct seat booking.
+    Query params: vehicle, destination_place (optional), latitude/longitude or check_in_lat/check_in_lng.
+    Uses vehicle's last location to destination (or 0 if no destination); per_km_charge from SuperSetting.
+    """
+    vehicle_id = request.query_params.get('vehicle')
+    destination_place_id = request.query_params.get('destination_place')
+    check_in_lat = request.query_params.get('latitude') or request.query_params.get('check_in_lat')
+    check_in_lng = request.query_params.get('longitude') or request.query_params.get('check_in_lng')
+    if not vehicle_id or check_in_lat is None or check_in_lng is None:
+        return Response(
+            {'error': 'vehicle, latitude/longitude (or check_in_lat/check_in_lng) are required'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        vehicle = Vehicle.objects.select_related('active_route').get(pk=vehicle_id)
+    except Vehicle.DoesNotExist:
+        return Response({'error': 'Vehicle not found'}, status=status.HTTP_404_NOT_FOUND)
+    try:
+        per_km = SuperSetting.objects.latest('created_at').per_km_charge
+    except SuperSetting.DoesNotExist:
+        return Response({'error': 'Per km charge not configured'}, status=status.HTTP_400_BAD_REQUEST)
+    last_loc = Location.objects.filter(vehicle=vehicle).order_by('-created_at').first()
+    if not last_loc:
+        return Response({'error': 'Vehicle has no location', 'per_km_charge': str(per_km)}, status=status.HTTP_400_BAD_REQUEST)
+    user_lat = Decimal(str(check_in_lat))
+    user_lng = Decimal(str(check_in_lng))
+    if destination_place_id:
+        try:
+            dest = Place.objects.get(pk=destination_place_id)
+            distance_km = haversine_distance(last_loc.latitude, last_loc.longitude, dest.latitude, dest.longitude)
+        except Place.DoesNotExist:
+            return Response({'error': 'Destination place not found'}, status=status.HTTP_404_NOT_FOUND)
+    else:
+        distance_km = haversine_distance(last_loc.latitude, last_loc.longitude, user_lat, user_lng)
+    estimated_amount = Decimal(str(distance_km)) * per_km
+    estimated_amount = Decimal(str(round(estimated_amount, 2)))
+    return Response({
+        'per_km_charge': str(per_km),
+        'distance_km': str(round(float(distance_km), 2)),
+        'estimated_trip_amount': str(estimated_amount),
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def direct_seat_booking_create_view(request):
+    """Direct seat booking by logged-in user: payment first (wallet), then create SeatBooking.
+    Body: vehicle, vehicle_seat, check_in_lat, check_in_lng, check_in_datetime, check_in_address, trip_amount, destination_place (optional).
+    Eligibility: vehicle has active_route, running trip, and latest location within 5 km of check-in.
+    """
+    vehicle_id = request.POST.get('vehicle') or request.data.get('vehicle')
+    vehicle_seat_id = request.POST.get('vehicle_seat') or request.data.get('vehicle_seat')
+    check_in_lat = request.POST.get('check_in_lat') or request.data.get('check_in_lat')
+    check_in_lng = request.POST.get('check_in_lng') or request.data.get('check_in_lng')
+    check_in_datetime = request.POST.get('check_in_datetime') or request.data.get('check_in_datetime')
+    check_in_address = request.POST.get('check_in_address') or request.data.get('check_in_address', '')
+    trip_amount_val = request.POST.get('trip_amount') or request.data.get('trip_amount')
+    destination_place_id = request.POST.get('destination_place') or request.data.get('destination_place') or None
+
+    if not vehicle_id or not vehicle_seat_id:
+        return Response({'error': 'vehicle and vehicle_seat are required'}, status=status.HTTP_400_BAD_REQUEST)
+    if not check_in_lat or not check_in_lng:
+        return Response({'error': 'check_in_lat and check_in_lng are required'}, status=status.HTTP_400_BAD_REQUEST)
+    if not check_in_datetime:
+        return Response({'error': 'check_in_datetime is required'}, status=status.HTTP_400_BAD_REQUEST)
+    if trip_amount_val is None or trip_amount_val == '':
+        return Response({'error': 'trip_amount is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        vehicle = Vehicle.objects.select_related('active_route').get(pk=vehicle_id)
+    except Vehicle.DoesNotExist:
+        return Response({'error': 'Vehicle not found'}, status=status.HTTP_404_NOT_FOUND)
+    try:
+        vehicle_seat = VehicleSeat.objects.get(pk=vehicle_seat_id, vehicle=vehicle)
+    except VehicleSeat.DoesNotExist:
+        return Response({'error': 'Vehicle seat not found'}, status=status.HTTP_404_NOT_FOUND)
+    if vehicle_seat.status != 'available':
+        return Response({'error': 'Seat is not available'}, status=status.HTTP_400_BAD_REQUEST)
+
+    user_lat = Decimal(str(check_in_lat))
+    user_lng = Decimal(str(check_in_lng))
+    ok, err = _vehicle_direct_book_eligible(vehicle, user_lat, user_lng)
+    if not ok:
+        return Response({'error': err}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        check_in_datetime = datetime.fromisoformat(str(check_in_datetime).replace('Z', '+00:00'))
+    except Exception:
+        return Response({'error': 'Invalid check_in_datetime format'}, status=status.HTTP_400_BAD_REQUEST)
+
+    trip_amount = Decimal(str(trip_amount_val))
+    if trip_amount <= 0:
+        return Response({'error': 'trip_amount must be positive'}, status=status.HTTP_400_BAD_REQUEST)
+
+    wallet = Wallet.objects.filter(user=request.user).first()
+    if not wallet:
+        return Response({'error': 'Wallet not found', 'code': 'no_wallet'}, status=status.HTTP_400_BAD_REQUEST)
+    if wallet.balance < trip_amount:
+        return Response(
+            {'error': 'Insufficient wallet balance. Please recharge.', 'code': 'insufficient_balance'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    destination_place = None
+    if destination_place_id:
+        try:
+            destination_place = Place.objects.get(pk=destination_place_id)
+        except Place.DoesNotExist:
+            return Response({'error': 'Destination place not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    active_trip = Trip.objects.filter(vehicle=vehicle, end_time__isnull=True).order_by('-start_time').first()
+
+    with db_transaction.atomic():
+        wallet.balance -= trip_amount
+        wallet.save(update_fields=['balance', 'updated_at'])
+        create_wallet_transaction(
+            wallet=wallet,
+            user=request.user,
+            amount=trip_amount,
+            type='deducted',
+            remarks=f'Direct seat booking - {vehicle.name} seat {vehicle_seat.side}{vehicle_seat.number}',
+            status='success',
+        )
+        booking = SeatBooking.objects.create(
+            user=request.user,
+            is_guest=False,
+            vehicle=vehicle,
+            vehicle_seat=vehicle_seat,
+            trip=active_trip,
+            check_in_lat=user_lat,
+            check_in_lng=user_lng,
+            check_in_datetime=check_in_datetime,
+            check_in_address=check_in_address or '',
+            destination_place=destination_place,
+            trip_amount=trip_amount,
+            is_paid=True,
+        )
+        vehicle_seat.status = 'booked'
+        vehicle_seat.save(update_fields=['status', 'updated_at'])
+
+    serializer = SeatBookingSerializer(booking)
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
