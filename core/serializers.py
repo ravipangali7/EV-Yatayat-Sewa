@@ -263,5 +263,5 @@ class SuperSettingSerializer(serializers.ModelSerializer):
     """Serializer for SuperSetting model"""
     class Meta:
         model = SuperSetting
-        fields = ['id', 'per_km_charge', 'gps_threshold_second', 'point_cover_radius', 'minute_coverage_schedule', 'seat_layout', 'stop_point_announcement_header', 'created_at', 'updated_at']
+        fields = ['id', 'per_km_charge', 'gps_threshold_second', 'point_cover_radius', 'minute_coverage_schedule', 'seat_layout', 'stop_point_announcement_header', 'short_trip_min_distance_for_booking', 'short_trip_max_distance_for_booking', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']

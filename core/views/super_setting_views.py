@@ -34,6 +34,8 @@ def super_setting_list_get_view(request):
             'minute_coverage_schedule': setting.minute_coverage_schedule,
             'seat_layout': getattr(setting, 'seat_layout', []) or [],
             'stop_point_announcement_header': getattr(setting, 'stop_point_announcement_header', '') or '',
+            'short_trip_min_distance_for_booking': str(setting.short_trip_min_distance_for_booking) if getattr(setting, 'short_trip_min_distance_for_booking', None) is not None else None,
+            'short_trip_max_distance_for_booking': str(setting.short_trip_max_distance_for_booking) if getattr(setting, 'short_trip_max_distance_for_booking', None) is not None else None,
             'created_at': setting.created_at.isoformat(),
             'updated_at': setting.updated_at.isoformat(),
         })
@@ -91,6 +93,17 @@ def super_setting_list_post_view(request):
     
     stop_point_announcement_header = (request.POST.get('stop_point_announcement_header') or request.data.get('stop_point_announcement_header') or '').strip()[:255]
     
+    short_trip_min = request.POST.get('short_trip_min_distance_for_booking') or request.data.get('short_trip_min_distance_for_booking')
+    short_trip_max = request.POST.get('short_trip_max_distance_for_booking') or request.data.get('short_trip_max_distance_for_booking')
+    try:
+        short_trip_min_distance_for_booking = Decimal(str(short_trip_min)) if short_trip_min is not None and str(short_trip_min).strip() != '' else None
+    except (ValueError, TypeError):
+        short_trip_min_distance_for_booking = None
+    try:
+        short_trip_max_distance_for_booking = Decimal(str(short_trip_max)) if short_trip_max is not None and str(short_trip_max).strip() != '' else None
+    except (ValueError, TypeError):
+        short_trip_max_distance_for_booking = None
+    
     # Create setting directly without serializer
     setting = SuperSetting.objects.create(
         per_km_charge=per_km_charge,
@@ -99,6 +112,8 @@ def super_setting_list_post_view(request):
         minute_coverage_schedule=minute_coverage_schedule,
         seat_layout=seat_layout,
         stop_point_announcement_header=stop_point_announcement_header,
+        short_trip_min_distance_for_booking=short_trip_min_distance_for_booking,
+        short_trip_max_distance_for_booking=short_trip_max_distance_for_booking,
     )
     
     # Return response
@@ -110,6 +125,8 @@ def super_setting_list_post_view(request):
         'minute_coverage_schedule': setting.minute_coverage_schedule,
         'seat_layout': setting.seat_layout,
         'stop_point_announcement_header': getattr(setting, 'stop_point_announcement_header', '') or '',
+        'short_trip_min_distance_for_booking': str(setting.short_trip_min_distance_for_booking) if setting.short_trip_min_distance_for_booking is not None else None,
+        'short_trip_max_distance_for_booking': str(setting.short_trip_max_distance_for_booking) if setting.short_trip_max_distance_for_booking is not None else None,
         'created_at': setting.created_at.isoformat(),
         'updated_at': setting.updated_at.isoformat(),
     }, status=status.HTTP_201_CREATED)
@@ -132,6 +149,8 @@ def super_setting_detail_get_view(request, pk):
         'minute_coverage_schedule': setting.minute_coverage_schedule,
         'seat_layout': getattr(setting, 'seat_layout', []) or [],
         'stop_point_announcement_header': getattr(setting, 'stop_point_announcement_header', '') or '',
+        'short_trip_min_distance_for_booking': str(setting.short_trip_min_distance_for_booking) if getattr(setting, 'short_trip_min_distance_for_booking', None) is not None else None,
+        'short_trip_max_distance_for_booking': str(setting.short_trip_max_distance_for_booking) if getattr(setting, 'short_trip_max_distance_for_booking', None) is not None else None,
         'created_at': setting.created_at.isoformat(),
         'updated_at': setting.updated_at.isoformat(),
     })
@@ -188,6 +207,19 @@ def super_setting_detail_post_view(request, pk):
         val = request.POST.get('stop_point_announcement_header') or request.data.get('stop_point_announcement_header')
         setting.stop_point_announcement_header = (val or '').strip()[:255]
     
+    if 'short_trip_min_distance_for_booking' in request.POST or 'short_trip_min_distance_for_booking' in request.data:
+        val = request.POST.get('short_trip_min_distance_for_booking') or request.data.get('short_trip_min_distance_for_booking')
+        try:
+            setting.short_trip_min_distance_for_booking = Decimal(str(val)) if val is not None and str(val).strip() != '' else None
+        except (ValueError, TypeError):
+            return Response({'error': 'Invalid short_trip_min_distance_for_booking value'}, status=status.HTTP_400_BAD_REQUEST)
+    if 'short_trip_max_distance_for_booking' in request.POST or 'short_trip_max_distance_for_booking' in request.data:
+        val = request.POST.get('short_trip_max_distance_for_booking') or request.data.get('short_trip_max_distance_for_booking')
+        try:
+            setting.short_trip_max_distance_for_booking = Decimal(str(val)) if val is not None and str(val).strip() != '' else None
+        except (ValueError, TypeError):
+            return Response({'error': 'Invalid short_trip_max_distance_for_booking value'}, status=status.HTTP_400_BAD_REQUEST)
+    
     setting.save()
     
     # Return updated data
@@ -199,6 +231,8 @@ def super_setting_detail_post_view(request, pk):
         'minute_coverage_schedule': setting.minute_coverage_schedule,
         'seat_layout': getattr(setting, 'seat_layout', []) or [],
         'stop_point_announcement_header': getattr(setting, 'stop_point_announcement_header', '') or '',
+        'short_trip_min_distance_for_booking': str(setting.short_trip_min_distance_for_booking) if getattr(setting, 'short_trip_min_distance_for_booking', None) is not None else None,
+        'short_trip_max_distance_for_booking': str(setting.short_trip_max_distance_for_booking) if getattr(setting, 'short_trip_max_distance_for_booking', None) is not None else None,
         'created_at': setting.created_at.isoformat(),
         'updated_at': setting.updated_at.isoformat(),
     })

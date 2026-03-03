@@ -14,8 +14,15 @@ from core.models import User, SuperSetting, Wallet, Transaction
 from core.services.wallet_transaction import create_wallet_transaction
 from ..serializers import SeatBookingSerializer
 
-DIRECT_BOOK_MIN_KM = 5   # Vehicle must be beyond 5 km for direct booking
-DIRECT_BOOK_MAX_KM = 200 # Vehicle must be within 200 km for direct booking
+def _get_booking_distance_km():
+    """Return (min_km, max_km) from latest SuperSetting, or (5, 200) as fallback."""
+    try:
+        ss = SuperSetting.objects.latest('created_at')
+        min_km = float(ss.short_trip_min_distance_for_booking) if ss.short_trip_min_distance_for_booking is not None else 5
+        max_km = float(ss.short_trip_max_distance_for_booking) if ss.short_trip_max_distance_for_booking is not None else 200
+        return min_km, max_km
+    except SuperSetting.DoesNotExist:
+        return 5, 200
 
 
 def haversine_distance(lat1, lon1, lat2, lon2):
@@ -547,7 +554,7 @@ def seat_booking_checkout_view(request):
 
 
 def _vehicle_direct_book_eligible(vehicle, user_lat, user_lng):
-    """Check if vehicle is eligible for direct booking: active_route, running trip, 5 km < distance <= 200 km."""
+    """Check if vehicle is eligible for direct booking: active_route, running trip, min_km < distance <= max_km (from SuperSetting)."""
     if not vehicle.active_route_id:
         return False, 'Vehicle has no active route'
     active_trip = Trip.objects.filter(vehicle=vehicle, end_time__isnull=True).order_by('-start_time').first()
@@ -556,11 +563,12 @@ def _vehicle_direct_book_eligible(vehicle, user_lat, user_lng):
     last_loc = Location.objects.filter(vehicle=vehicle).order_by('-created_at').first()
     if not last_loc:
         return False, 'Vehicle has no location'
+    min_km, max_km = _get_booking_distance_km()
     dist_km = float(haversine_distance(user_lat, user_lng, last_loc.latitude, last_loc.longitude))
-    if dist_km <= DIRECT_BOOK_MIN_KM:
-        return False, f'Vehicle must be more than {DIRECT_BOOK_MIN_KM} km away to book'
-    if dist_km > DIRECT_BOOK_MAX_KM:
-        return False, f'Vehicle is more than {DIRECT_BOOK_MAX_KM} km away'
+    if dist_km <= min_km:
+        return False, f'Vehicle must be more than {min_km} km away to book'
+    if dist_km > max_km:
+        return False, f'Vehicle is more than {max_km} km away'
     return True, None
 
 

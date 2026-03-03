@@ -254,10 +254,19 @@ def vehicle_list_get_view(request):
     })
 
 
-# Bookable: vehicle must be above 5 km and within 200 km (active route + running trip)
-NEARBY_BOOK_MIN_KM = 5
-NEARBY_BOOK_MAX_KM = 200
+# Bookable: min/max distance from SuperSetting (short_trip_min/max_distance_for_booking), fallback 5–200 km
 NEARBY_FETCH_RADIUS_KM = 200  # Show vehicles up to 200 km (e.g. Nepal radius)
+
+
+def _get_booking_distance_km():
+    """Return (min_km, max_km) from latest SuperSetting, or (5, 200) as fallback."""
+    try:
+        ss = SuperSetting.objects.latest('created_at')
+        min_km = float(ss.short_trip_min_distance_for_booking) if ss.short_trip_min_distance_for_booking is not None else 5
+        max_km = float(ss.short_trip_max_distance_for_booking) if ss.short_trip_max_distance_for_booking is not None else 200
+        return min_km, max_km
+    except SuperSetting.DoesNotExist:
+        return 5, 200
 
 
 @api_view(['GET'])
@@ -265,7 +274,7 @@ def vehicle_nearby_get_view(request):
     """List vehicles with last location within radius_km of (latitude, longitude).
     Query params: latitude, longitude, radius_km (default 200 for display), bookable_only (optional), active_trip_only (optional).
     Returns last_latitude, last_longitude, last_location_at, distance_km, can_book.
-    can_book = (5 < distance_km <= 200 and active_route and running trip).
+    can_book = (min_km < distance_km <= max_km and active_route and running trip); min/max from SuperSetting.
     active_trip_only: when true, return only vehicles that have a running trip (end_time is null).
     """
     lat = request.query_params.get('latitude')
@@ -276,6 +285,7 @@ def vehicle_nearby_get_view(request):
         radius_km = NEARBY_FETCH_RADIUS_KM
     bookable_only = request.query_params.get('bookable_only', '').lower() in ('true', '1', 'yes')
     active_trip_only = request.query_params.get('active_trip_only', '').lower() in ('true', '1', 'yes')
+    min_km, max_km = _get_booking_distance_km()
 
     if lat is None or lng is None:
         return Response({'error': 'latitude and longitude are required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -308,7 +318,7 @@ def vehicle_nearby_get_view(request):
         if distance_km > radius_km:
             continue
         can_book = (
-            NEARBY_BOOK_MIN_KM < distance_km <= NEARBY_BOOK_MAX_KM
+            min_km < distance_km <= max_km
             and vehicle.active_route_id is not None
             and vehicle.has_running_trip
         )
