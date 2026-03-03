@@ -45,6 +45,27 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     return Decimal(str(round(c * r, 2)))
 
 
+def _trip_amount_from_distance(distance_km, per_km_charge, initial_km=None, initial_km_charge=None):
+    """
+    Compute trip amount from distance. If initial_km and initial_km_charge are set:
+    - distance <= initial_km -> initial_km_charge (flat)
+    - distance > initial_km -> initial_km_charge + (distance - initial_km) * per_km_charge
+    Otherwise: distance * per_km_charge (legacy).
+    """
+    distance_km = Decimal(str(distance_km))
+    per_km_charge = Decimal(str(per_km_charge))
+    if initial_km is not None and initial_km_charge is not None:
+        initial_km = Decimal(str(initial_km))
+        initial_km_charge = Decimal(str(initial_km_charge))
+        if distance_km <= initial_km:
+            return Decimal(str(round(initial_km_charge, 2)))
+        extra_km = distance_km - initial_km
+        amount = initial_km_charge + extra_km * per_km_charge
+        return Decimal(str(round(amount, 2)))
+    amount = distance_km * per_km_charge
+    return Decimal(str(round(amount, 2)))
+
+
 def _parse_date_sb(val):
     if val is None or val == '':
         return None
@@ -458,9 +479,13 @@ def seat_booking_checkout_view(request):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+    initial_km = None
+    initial_km_charge = None
     try:
         super_setting = SuperSetting.objects.latest('created_at')
         per_km_charge = super_setting.per_km_charge
+        initial_km = getattr(super_setting, 'initial_km', None)
+        initial_km_charge = getattr(super_setting, 'initial_km_charge', None)
     except SuperSetting.DoesNotExist:
         per_km_charge = None
 
@@ -481,8 +506,9 @@ def seat_booking_checkout_view(request):
                 booking.check_in_lat, booking.check_in_lng,
                 Decimal(str(check_out_lat)), Decimal(str(check_out_lng))
             )
-            new_trip_amount = distance_from_checkin * per_km_charge if per_km_charge else booking.trip_amount
-            new_trip_amount = Decimal(str(round(new_trip_amount, 2)))
+            new_trip_amount = _trip_amount_from_distance(
+                distance_from_checkin, per_km_charge, initial_km, initial_km_charge
+            ) if per_km_charge else booking.trip_amount
             destination_trip_amount = booking.trip_amount or Decimal('0')
             amount_diff = new_trip_amount - destination_trip_amount
             return Response({
@@ -515,8 +541,7 @@ def seat_booking_checkout_view(request):
     else:
         if not per_km_charge:
             return Response({'error': 'Super setting not found. Please configure per_km_charge.'}, status=status.HTTP_400_BAD_REQUEST)
-        trip_amount = Decimal(str(distance)) * per_km_charge
-        trip_amount = Decimal(str(round(trip_amount, 2)))
+        trip_amount = _trip_amount_from_distance(distance, per_km_charge, initial_km, initial_km_charge)
 
     booking.check_out_lat = Decimal(str(check_out_lat))
     booking.check_out_lng = Decimal(str(check_out_lng))
@@ -592,7 +617,10 @@ def direct_seat_booking_preview_view(request):
     except Vehicle.DoesNotExist:
         return Response({'error': 'Vehicle not found'}, status=status.HTTP_404_NOT_FOUND)
     try:
-        per_km = SuperSetting.objects.latest('created_at').per_km_charge
+        super_setting = SuperSetting.objects.latest('created_at')
+        per_km = super_setting.per_km_charge
+        initial_km = getattr(super_setting, 'initial_km', None)
+        initial_km_charge = getattr(super_setting, 'initial_km_charge', None)
     except SuperSetting.DoesNotExist:
         return Response({'error': 'Per km charge not configured'}, status=status.HTTP_400_BAD_REQUEST)
     last_loc = Location.objects.filter(vehicle=vehicle).order_by('-created_at').first()
@@ -608,8 +636,7 @@ def direct_seat_booking_preview_view(request):
             return Response({'error': 'Destination place not found'}, status=status.HTTP_404_NOT_FOUND)
     else:
         distance_km = haversine_distance(last_loc.latitude, last_loc.longitude, user_lat, user_lng)
-    estimated_amount = Decimal(str(distance_km)) * per_km
-    estimated_amount = Decimal(str(round(estimated_amount, 2)))
+    estimated_amount = _trip_amount_from_distance(distance_km, per_km, initial_km, initial_km_charge)
     return Response({
         'per_km_charge': str(per_km),
         'distance_km': str(round(float(distance_km), 2)),

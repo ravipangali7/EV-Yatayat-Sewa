@@ -69,6 +69,8 @@ class SuperSetting(models.Model):
     stop_point_announcement_header = models.CharField(max_length=255, blank=True, default='')
     short_trip_min_distance_for_booking = models.DecimalField(max_digits=10, decimal_places=2, default=5, null=True, blank=True)  # km
     short_trip_max_distance_for_booking = models.DecimalField(max_digits=10, decimal_places=2, default=200, null=True, blank=True)  # km
+    initial_km = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)  # km; flat charge applies up to this distance
+    initial_km_charge = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)  # Rs; flat charge for first initial_km
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
     updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
     

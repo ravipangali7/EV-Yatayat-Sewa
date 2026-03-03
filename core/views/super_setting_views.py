@@ -29,6 +29,8 @@ def super_setting_list_get_view(request):
         results.append({
             'id': str(setting.id),
             'per_km_charge': str(setting.per_km_charge),
+            'initial_km': str(setting.initial_km) if getattr(setting, 'initial_km', None) is not None else None,
+            'initial_km_charge': str(setting.initial_km_charge) if getattr(setting, 'initial_km_charge', None) is not None else None,
             'gps_threshold_second': str(setting.gps_threshold_second),
             'point_cover_radius': str(setting.point_cover_radius) if setting.point_cover_radius is not None else None,
             'minute_coverage_schedule': setting.minute_coverage_schedule,
@@ -103,10 +105,23 @@ def super_setting_list_post_view(request):
         short_trip_max_distance_for_booking = Decimal(str(short_trip_max)) if short_trip_max is not None and str(short_trip_max).strip() != '' else None
     except (ValueError, TypeError):
         short_trip_max_distance_for_booking = None
+
+    initial_km = request.POST.get('initial_km') or request.data.get('initial_km')
+    initial_km_charge = request.POST.get('initial_km_charge') or request.data.get('initial_km_charge')
+    try:
+        initial_km = Decimal(str(initial_km)) if initial_km is not None and str(initial_km).strip() != '' else None
+    except (ValueError, TypeError):
+        initial_km = None
+    try:
+        initial_km_charge = Decimal(str(initial_km_charge)) if initial_km_charge is not None and str(initial_km_charge).strip() != '' else None
+    except (ValueError, TypeError):
+        initial_km_charge = None
     
     # Create setting directly without serializer
     setting = SuperSetting.objects.create(
         per_km_charge=per_km_charge,
+        initial_km=initial_km,
+        initial_km_charge=initial_km_charge,
         gps_threshold_second=gps_threshold_second,
         point_cover_radius=point_cover_radius,
         minute_coverage_schedule=minute_coverage_schedule,
@@ -120,6 +135,8 @@ def super_setting_list_post_view(request):
     return Response({
         'id': str(setting.id),
         'per_km_charge': str(setting.per_km_charge),
+        'initial_km': str(setting.initial_km) if setting.initial_km is not None else None,
+        'initial_km_charge': str(setting.initial_km_charge) if setting.initial_km_charge is not None else None,
         'gps_threshold_second': str(setting.gps_threshold_second),
         'point_cover_radius': str(setting.point_cover_radius) if setting.point_cover_radius is not None else None,
         'minute_coverage_schedule': setting.minute_coverage_schedule,
@@ -144,6 +161,8 @@ def super_setting_detail_get_view(request, pk):
     return Response({
         'id': str(setting.id),
         'per_km_charge': str(setting.per_km_charge),
+        'initial_km': str(setting.initial_km) if getattr(setting, 'initial_km', None) is not None else None,
+        'initial_km_charge': str(setting.initial_km_charge) if getattr(setting, 'initial_km_charge', None) is not None else None,
         'gps_threshold_second': str(setting.gps_threshold_second),
         'point_cover_radius': str(setting.point_cover_radius) if setting.point_cover_radius is not None else None,
         'minute_coverage_schedule': setting.minute_coverage_schedule,
@@ -171,6 +190,19 @@ def super_setting_detail_post_view(request, pk):
             setting.per_km_charge = Decimal(str(per_km_charge))
         except (ValueError, TypeError):
             return Response({'error': 'Invalid per_km_charge value'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if 'initial_km' in request.POST or 'initial_km' in request.data:
+        val = request.POST.get('initial_km') or request.data.get('initial_km')
+        try:
+            setting.initial_km = Decimal(str(val)) if val is not None and str(val).strip() != '' else None
+        except (ValueError, TypeError):
+            return Response({'error': 'Invalid initial_km value'}, status=status.HTTP_400_BAD_REQUEST)
+    if 'initial_km_charge' in request.POST or 'initial_km_charge' in request.data:
+        val = request.POST.get('initial_km_charge') or request.data.get('initial_km_charge')
+        try:
+            setting.initial_km_charge = Decimal(str(val)) if val is not None and str(val).strip() != '' else None
+        except (ValueError, TypeError):
+            return Response({'error': 'Invalid initial_km_charge value'}, status=status.HTTP_400_BAD_REQUEST)
     
     if 'gps_threshold_second' in request.POST or 'gps_threshold_second' in request.data:
         gps_threshold_second = request.POST.get('gps_threshold_second') or request.data.get('gps_threshold_second')
@@ -226,6 +258,8 @@ def super_setting_detail_post_view(request, pk):
     return Response({
         'id': str(setting.id),
         'per_km_charge': str(setting.per_km_charge),
+        'initial_km': str(setting.initial_km) if getattr(setting, 'initial_km', None) is not None else None,
+        'initial_km_charge': str(setting.initial_km_charge) if getattr(setting, 'initial_km_charge', None) is not None else None,
         'gps_threshold_second': str(setting.gps_threshold_second),
         'point_cover_radius': str(setting.point_cover_radius) if setting.point_cover_radius is not None else None,
         'minute_coverage_schedule': setting.minute_coverage_schedule,

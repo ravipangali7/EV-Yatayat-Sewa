@@ -34,8 +34,8 @@ class UserAdmin(BaseUserAdmin):
 @admin.register(SuperSetting)
 class SuperSettingAdmin(admin.ModelAdmin):
     """SuperSetting admin"""
-    list_display = ('id', 'per_km_charge', 'gps_threshold_second', 'point_cover_radius', 'minute_coverage_schedule', 'short_trip_min_distance_for_booking', 'short_trip_max_distance_for_booking', 'created_at', 'updated_at')
-    list_editable = ('per_km_charge', 'gps_threshold_second', 'point_cover_radius', 'minute_coverage_schedule', 'short_trip_min_distance_for_booking', 'short_trip_max_distance_for_booking')
+    list_display = ('id', 'per_km_charge', 'initial_km', 'initial_km_charge', 'gps_threshold_second', 'point_cover_radius', 'minute_coverage_schedule', 'short_trip_min_distance_for_booking', 'short_trip_max_distance_for_booking', 'created_at', 'updated_at')
+    list_editable = ('per_km_charge', 'initial_km', 'initial_km_charge', 'gps_threshold_second', 'point_cover_radius', 'minute_coverage_schedule', 'short_trip_min_distance_for_booking', 'short_trip_max_distance_for_booking')
     readonly_fields = ('created_at', 'updated_at')
     list_filter = ('created_at', 'updated_at')
 
