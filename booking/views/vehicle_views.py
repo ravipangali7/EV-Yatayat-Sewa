@@ -263,9 +263,10 @@ NEARBY_FETCH_RADIUS_KM = 200  # Show vehicles up to 200 km (e.g. Nepal radius)
 @api_view(['GET'])
 def vehicle_nearby_get_view(request):
     """List vehicles with last location within radius_km of (latitude, longitude).
-    Query params: latitude, longitude, radius_km (default 200 for display), bookable_only (optional).
+    Query params: latitude, longitude, radius_km (default 200 for display), bookable_only (optional), active_trip_only (optional).
     Returns last_latitude, last_longitude, last_location_at, distance_km, can_book.
     can_book = (5 < distance_km <= 200 and active_route and running trip).
+    active_trip_only: when true, return only vehicles that have a running trip (end_time is null).
     """
     lat = request.query_params.get('latitude')
     lng = request.query_params.get('longitude')
@@ -274,6 +275,7 @@ def vehicle_nearby_get_view(request):
     except (TypeError, ValueError):
         radius_km = NEARBY_FETCH_RADIUS_KM
     bookable_only = request.query_params.get('bookable_only', '').lower() in ('true', '1', 'yes')
+    active_trip_only = request.query_params.get('active_trip_only', '').lower() in ('true', '1', 'yes')
 
     if lat is None or lng is None:
         return Response({'error': 'latitude and longitude are required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -311,6 +313,8 @@ def vehicle_nearby_get_view(request):
             and vehicle.has_running_trip
         )
         if bookable_only and not can_book:
+            continue
+        if active_trip_only and not vehicle.has_running_trip:
             continue
 
         driver_details = []
