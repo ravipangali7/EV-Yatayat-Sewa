@@ -6,7 +6,17 @@ import json
 
 from ..models import SiteSetting
 from ..serializers import SiteSettingSerializer
-from .utils import get_request_data
+
+
+def _form_value_to_string(val):
+    """Normalize form value to string so CharFields never receive a list."""
+    if val is None:
+        return ''
+    if isinstance(val, str):
+        return val
+    if isinstance(val, (list, tuple)) and len(val) == 1:
+        return _form_value_to_string(val[0])
+    return ''
 
 
 @api_view(['GET'])
@@ -23,9 +33,15 @@ def site_setting_get_view(request):
 @permission_classes([IsAuthenticated])
 def site_setting_post_view(request):
     """Create or update the single site setting."""
-    raw = get_request_data(request)
-    # Use a plain dict so parsed JSON stays as list/dict (QueryDict can break JSONField)
-    data = dict(raw)
+    # Build payload explicitly so CharFields get strings and ImageFields get real files only
+    data = {}
+    for key in request.POST:
+        data[key] = _form_value_to_string(request.POST.get(key))
+
+    for key in request.FILES:
+        f = request.FILES[key]
+        if f and getattr(f, 'name', None):
+            data[key] = f
 
     obj = SiteSetting.objects.first()
     if not obj:
