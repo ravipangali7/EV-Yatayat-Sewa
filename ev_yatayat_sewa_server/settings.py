@@ -98,6 +98,10 @@ CORS_ALLOW_HEADERS = [
     'x-requested-with',
 ]
 
+# Allow larger request body for image/file uploads (e.g. sliders, CMS, blog). Nginx must also allow (client_max_body_size).
+DATA_UPLOAD_MAX_MEMORY_SIZE = 25 * 1024 * 1024   # 25 MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 25 * 1024 * 1024   # 25 MB
+
 ROOT_URLCONF = 'ev_yatayat_sewa_server.urls'
 
 TEMPLATES = [
