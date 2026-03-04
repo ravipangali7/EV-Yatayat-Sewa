@@ -84,6 +84,19 @@ CORS_ALLOWED_ORIGINS = [
     'http://127.0.0.1:5173',
 ]
 CORS_ALLOW_ALL_ORIGINS = False
+# Allow credentials so browser sends cookies/auth and server returns specific origin
+CORS_ALLOW_CREDENTIALS = True
+# Ensure headers used by API client (Authorization, Content-Type for multipart) are allowed
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
 
 ROOT_URLCONF = 'ev_yatayat_sewa_server.urls'
 
