@@ -27,6 +27,7 @@ urlpatterns = [
     path('api/', include('booking.urls')),
     path('api/', include('core.urls')),
     path('api/', include('walkietalkie.urls')),
+    path('api/', include('website.urls')),
 ]
 
 urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

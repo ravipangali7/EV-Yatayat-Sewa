@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     'core',
     'booking',
     'walkietalkie',
+    'website',
     'rest_framework',
     'rest_framework.authtoken',
     'corsheaders',
