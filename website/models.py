@@ -90,11 +90,14 @@ class Testimonial(models.Model):
 
 
 class Service(models.Model):
+    """Website service (e.g. City Transport, Charter). Design uses title/desc/icon."""
     id = models.BigAutoField(primary_key=True)
     name = models.CharField(max_length=255)
     slug = models.SlugField(max_length=255, unique=True)
     svg = models.TextField(blank=True, default='')
     description = models.TextField(blank=True, default='')
+    # Lucide icon name for new design (e.g. Bus, Building2, Mountain, CalendarCheck, Plane, GraduationCap)
+    icon = models.CharField(max_length=50, blank=True, default='')
     order = models.IntegerField(default=0)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
@@ -154,6 +157,10 @@ class Blog(models.Model):
     slug = models.SlugField(max_length=255, unique=True)
     image = models.ImageField(upload_to='uploads/website/blog/', blank=True, null=True)
     content = models.TextField(blank=True, default='')
+    # Short summary for cards/list; design uses excerpt
+    excerpt = models.CharField(max_length=500, blank=True, default='')
+    # Category label for design (e.g. Industry, Travel, Education, News)
+    category = models.CharField(max_length=100, blank=True, default='')
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
     updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')

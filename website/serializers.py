@@ -83,7 +83,7 @@ class ServiceSerializer(serializers.ModelSerializer):
     class Meta:
         model = Service
         fields = [
-            'id', 'name', 'slug', 'svg', 'description', 'order', 'is_active',
+            'id', 'name', 'slug', 'svg', 'description', 'icon', 'order', 'is_active',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
@@ -119,7 +119,7 @@ class BlogSerializer(serializers.ModelSerializer):
     class Meta:
         model = Blog
         fields = [
-            'id', 'name', 'slug', 'image', 'content', 'is_active',
+            'id', 'name', 'slug', 'image', 'content', 'excerpt', 'category', 'is_active',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
