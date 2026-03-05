@@ -188,6 +188,12 @@ class SiteSetting(models.Model):
     cover_image = models.ImageField(upload_to='uploads/website/site/', blank=True, null=True)
     footer_text = models.TextField(blank=True, default='')
     stats = models.JSONField(default=dict, blank=True)  # {"stats": [{"label","svg","value"}, ...]}
+    about_image = models.ImageField(upload_to='uploads/website/site/', blank=True, null=True)
+    about_title = models.CharField(max_length=500, blank=True, default='')
+    about_content = models.TextField(blank=True, default='')  # HTML from CKEditor
+    mission = models.TextField(blank=True, default='')
+    vision = models.TextField(blank=True, default='')
+    values = models.JSONField(default=list, blank=True)  # [{"svg": "Zap", "text": "..."}, ...]
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
     updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
 

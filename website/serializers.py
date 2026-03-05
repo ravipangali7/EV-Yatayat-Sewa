@@ -131,6 +131,7 @@ class SiteSettingSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'logo', 'name', 'tagline', 'phones', 'emails', 'address', 'map',
             'cover_image', 'footer_text', 'stats',
+            'about_image', 'about_title', 'about_content', 'mission', 'vision', 'values',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']

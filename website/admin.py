@@ -72,3 +72,10 @@ class BlogAdmin(admin.ModelAdmin):
 class SiteSettingAdmin(admin.ModelAdmin):
     list_display = ('id', 'name', 'tagline', 'created_at')
     search_fields = ('name', 'tagline')
+    fieldsets = (
+        (None, {'fields': ('name', 'tagline', 'logo', 'cover_image')}),
+        ('Contact', {'fields': ('address', 'phones', 'emails', 'map')}),
+        ('Footer', {'fields': ('footer_text',)}),
+        ('Stats', {'fields': ('stats',)}),
+        ('About', {'fields': ('about_image', 'about_title', 'about_content', 'mission', 'vision', 'values')}),
+    )
