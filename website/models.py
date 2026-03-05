@@ -193,7 +193,7 @@ class SiteSetting(models.Model):
     about_content = models.TextField(blank=True, default='')  # HTML from CKEditor
     mission = models.TextField(blank=True, default='')
     vision = models.TextField(blank=True, default='')
-    values = models.JSONField(default=list, blank=True)  # [{"svg": "Zap", "text": "..."}, ...]
+    values = models.TextField(blank=True, default='')  # plain text, shown like mission/vision
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
     updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
 

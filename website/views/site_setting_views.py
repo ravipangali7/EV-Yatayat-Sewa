@@ -48,7 +48,7 @@ def site_setting_post_view(request):
         obj = SiteSetting.objects.create(name='', tagline='', phones=[], emails=[], stats={'stats': []})
 
     # Parse JSON fields from form strings so serializer gets list/dict, not string
-    for field in ('phones', 'emails', 'stats', 'values'):
+    for field in ('phones', 'emails', 'stats'):
         if field in data:
             val = data[field]
             if isinstance(val, str):
