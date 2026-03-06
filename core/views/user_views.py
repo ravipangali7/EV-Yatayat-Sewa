@@ -8,16 +8,19 @@ from ..models import User
 
 @api_view(['GET'])
 def user_list_get_view(request):
-    """List all users"""
+    """List all users. Supports exact phone match via ?phone= for transfer recipient lookup."""
     # Get query parameters
+    phone_exact = (request.query_params.get('phone') or '').strip()
     search = request.query_params.get('search', '')
     is_driver = request.query_params.get('is_driver', None)
     is_active = request.query_params.get('is_active', None)
-    
+
     # Build queryset
     queryset = User.objects.all()
-    
-    if search:
+
+    if phone_exact:
+        queryset = queryset.filter(phone=phone_exact)
+    elif search:
         queryset = queryset.filter(
             Q(name__icontains=search) |
             Q(phone__icontains=search) |
@@ -196,12 +199,15 @@ def user_detail_get_view(request, pk):
 
 @api_view(['POST'])
 def user_detail_post_view(request, pk):
-    """Update/edit a user"""
+    """Update/edit a user. Non-staff can only edit their own profile."""
     try:
         user = User.objects.get(pk=pk)
     except User.DoesNotExist:
         return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
-    
+
+    if not getattr(request.user, 'is_staff', False) and request.user.pk != pk:
+        return Response({'error': 'You can only edit your own profile'}, status=status.HTTP_403_FORBIDDEN)
+
     # Extract data from request.POST or request.data
     if 'name' in request.POST or 'name' in request.data:
         user.name = request.POST.get('name') or request.data.get('name') or None
