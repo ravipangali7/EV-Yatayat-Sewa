@@ -607,21 +607,41 @@ def _vehicle_direct_book_eligible(vehicle, user_lat, user_lng):
 
 @api_view(['GET'])
 def direct_seat_booking_preview_view(request):
-    """Preview estimated trip_amount for direct seat booking.
-    Query params: vehicle, destination_place (optional), latitude/longitude or check_in_lat/check_in_lng.
-    Uses vehicle's last location to destination (or 0 if no destination); per_km_charge from SuperSetting.
+    """Preview estimated trip_amount for direct seat booking (short trip).
+    Price is based on distance from origin to destination.
+    Query params: vehicle, destination_place (to, required). Origin: either origin_place (Place id)
+    or latitude/longitude (current location).
     """
     vehicle_id = request.query_params.get('vehicle')
     destination_place_id = request.query_params.get('destination_place')
+    origin_place_id = request.query_params.get('origin_place')
     check_in_lat = request.query_params.get('latitude') or request.query_params.get('check_in_lat')
     check_in_lng = request.query_params.get('longitude') or request.query_params.get('check_in_lng')
-    if not vehicle_id or check_in_lat is None or check_in_lng is None:
+
+    if not vehicle_id:
+        return Response({'error': 'vehicle is required'}, status=status.HTTP_400_BAD_REQUEST)
+    if not destination_place_id:
+        return Response({'error': 'destination_place (to) is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Resolve origin: either origin_place or latitude/longitude
+    if origin_place_id:
+        try:
+            origin_place = Place.objects.get(pk=origin_place_id)
+            origin_lat = origin_place.latitude
+            origin_lng = origin_place.longitude
+        except Place.DoesNotExist:
+            return Response({'error': 'Origin place not found'}, status=status.HTTP_404_NOT_FOUND)
+    elif check_in_lat is not None and check_in_lng is not None:
+        origin_lat = Decimal(str(check_in_lat))
+        origin_lng = Decimal(str(check_in_lng))
+    else:
         return Response(
-            {'error': 'vehicle, latitude/longitude (or check_in_lat/check_in_lng) are required'},
+            {'error': 'Provide either origin_place or latitude/longitude for from'},
             status=status.HTTP_400_BAD_REQUEST,
         )
+
     try:
-        vehicle = Vehicle.objects.select_related('active_route').get(pk=vehicle_id)
+        Vehicle.objects.select_related('active_route').get(pk=vehicle_id)
     except Vehicle.DoesNotExist:
         return Response({'error': 'Vehicle not found'}, status=status.HTTP_404_NOT_FOUND)
     try:
@@ -631,19 +651,13 @@ def direct_seat_booking_preview_view(request):
         initial_km_charge = getattr(super_setting, 'initial_km_charge', None)
     except SuperSetting.DoesNotExist:
         return Response({'error': 'Per km charge not configured'}, status=status.HTTP_400_BAD_REQUEST)
-    last_loc = Location.objects.filter(vehicle=vehicle).order_by('-created_at').first()
-    if not last_loc:
-        return Response({'error': 'Vehicle has no location', 'per_km_charge': str(per_km)}, status=status.HTTP_400_BAD_REQUEST)
-    user_lat = Decimal(str(check_in_lat))
-    user_lng = Decimal(str(check_in_lng))
-    if destination_place_id:
-        try:
-            dest = Place.objects.get(pk=destination_place_id)
-            distance_km = haversine_distance(last_loc.latitude, last_loc.longitude, dest.latitude, dest.longitude)
-        except Place.DoesNotExist:
-            return Response({'error': 'Destination place not found'}, status=status.HTTP_404_NOT_FOUND)
-    else:
-        distance_km = haversine_distance(last_loc.latitude, last_loc.longitude, user_lat, user_lng)
+
+    try:
+        dest = Place.objects.get(pk=destination_place_id)
+    except Place.DoesNotExist:
+        return Response({'error': 'Destination place not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    distance_km = haversine_distance(origin_lat, origin_lng, dest.latitude, dest.longitude)
     estimated_amount = _trip_amount_from_distance(distance_km, per_km, initial_km, initial_km_charge)
     return Response({
         'per_km_charge': str(per_km),
