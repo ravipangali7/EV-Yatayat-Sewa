@@ -10,7 +10,6 @@ class PlaceAdmin(admin.ModelAdmin):
     search_fields = ('name', 'code', 'address')
     list_editable = ('name', 'code', 'latitude', 'longitude')
     readonly_fields = ('created_at', 'updated_at')
-    date_hierarchy = 'created_at'
 
 
 class RouteStopPointInline(admin.StackedInline):
@@ -31,7 +30,6 @@ class RouteAdmin(admin.ModelAdmin):
     raw_id_fields = ('start_point', 'end_point')
     readonly_fields = ('created_at', 'updated_at')
     inlines = [RouteStopPointInline]
-    date_hierarchy = 'created_at'
 
 
 @admin.register(RouteStopPoint)
@@ -70,7 +68,6 @@ class VehicleAdmin(admin.ModelAdmin):
     filter_horizontal = ('drivers', 'routes')
     readonly_fields = ('created_at', 'updated_at')
     inlines = [VehicleSeatInline, VehicleImageInline]
-    date_hierarchy = 'created_at'
 
 
 @admin.register(VehicleSeat)
@@ -82,7 +79,6 @@ class VehicleSeatAdmin(admin.ModelAdmin):
     list_editable = ('status',)
     raw_id_fields = ('vehicle',)
     readonly_fields = ('created_at', 'updated_at')
-    date_hierarchy = 'created_at'
 
 
 @admin.register(VehicleImage)
@@ -93,7 +89,6 @@ class VehicleImageAdmin(admin.ModelAdmin):
     search_fields = ('vehicle__name', 'vehicle__vehicle_no', 'title')
     raw_id_fields = ('vehicle',)
     readonly_fields = ('created_at', 'updated_at')
-    date_hierarchy = 'created_at'
 
 
 @admin.register(VehicleSchedule)
@@ -104,7 +99,6 @@ class VehicleScheduleAdmin(admin.ModelAdmin):
     search_fields = ('vehicle__name', 'vehicle__vehicle_no', 'route__name')
     raw_id_fields = ('vehicle', 'route')
     readonly_fields = ('created_at', 'updated_at')
-    date_hierarchy = 'date'
 
 
 @admin.register(Trip)
@@ -115,7 +109,6 @@ class TripAdmin(admin.ModelAdmin):
     search_fields = ('trip_id', 'vehicle__name', 'vehicle__vehicle_no', 'driver__name', 'driver__phone', 'route__name')
     raw_id_fields = ('vehicle', 'driver', 'route', 'vehicle_schedule')
     readonly_fields = ('created_at', 'updated_at')
-    date_hierarchy = 'created_at'
 
 
 @admin.register(Location)
@@ -126,7 +119,7 @@ class LocationAdmin(admin.ModelAdmin):
     search_fields = ('vehicle__name', 'vehicle__vehicle_no')
     raw_id_fields = ('vehicle', 'trip')
     readonly_fields = ('created_at', 'updated_at')
-    date_hierarchy = 'created_at'
+    # date_hierarchy removed: requires MySQL timezone tables when USE_TZ=True (see Django ValueError)
 
 
 @admin.register(VehicleTicketBooking)
@@ -137,7 +130,6 @@ class VehicleTicketBookingAdmin(admin.ModelAdmin):
     search_fields = ('pnr', 'ticket_id', 'name', 'phone', 'vehicle_schedule__vehicle__name')
     raw_id_fields = ('user', 'vehicle_schedule')
     readonly_fields = ('created_at', 'updated_at')
-    date_hierarchy = 'created_at'
 
 
 @admin.register(SeatBooking)
@@ -149,4 +141,3 @@ class SeatBookingAdmin(admin.ModelAdmin):
     list_editable = ('is_paid',)
     raw_id_fields = ('user', 'vehicle', 'vehicle_seat', 'trip')
     readonly_fields = ('created_at', 'updated_at')
-    date_hierarchy = 'check_in_datetime'
