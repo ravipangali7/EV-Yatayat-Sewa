@@ -321,11 +321,12 @@ def _parse_date(val):
 
 @api_view(['GET'])
 def trip_list_get_view(request):
-    """List trips with filters: vehicle, driver, route, active_only, search (trip_id), date_from, date_to."""
+    """List trips with filters: vehicle, driver, route, vehicle_schedule, active_only, search (trip_id), date_from, date_to."""
     from django.db.models import Q
     vehicle_id = request.query_params.get('vehicle')
     driver_id = request.query_params.get('driver')
     route_id = request.query_params.get('route')
+    vehicle_schedule_id = request.query_params.get('vehicle_schedule')
     active_only = request.query_params.get('active_only')
     search = request.query_params.get('search', '').strip()
     date_from = _parse_date(request.query_params.get('date_from'))
@@ -338,6 +339,8 @@ def trip_list_get_view(request):
         queryset = queryset.filter(driver_id=driver_id)
     if route_id:
         queryset = queryset.filter(route_id=route_id)
+    if vehicle_schedule_id:
+        queryset = queryset.filter(vehicle_schedule_id=vehicle_schedule_id)
     if active_only and active_only.lower() == 'true':
         queryset = queryset.filter(end_time__isnull=True)
     if search:
