@@ -10,6 +10,7 @@ import math
 import json
 from django.db.models import F
 from ..models import Vehicle, VehicleSeat, SeatBooking, Trip, Place, Location
+from ..services.notify_node import notify_node_seat_booked
 from core.models import User, SuperSetting, Wallet, Transaction
 from core.services.wallet_transaction import create_wallet_transaction
 from ..serializers import SeatBookingSerializer
@@ -283,6 +284,13 @@ def _create_seat_booking(request):
     # Update seat status to booked
     vehicle_seat.status = 'booked'
     vehicle_seat.save()
+
+    if active_trip:
+        notify_node_seat_booked(
+            active_trip.id,
+            vehicle.id,
+            [{'vehicle_seat_id': vehicle_seat.id, 'side': vehicle_seat.side, 'number': vehicle_seat.number}],
+        )
 
     serializer = SeatBookingSerializer(booking)
     return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -740,6 +748,12 @@ def direct_seat_booking_create_view(request):
         )
         vehicle_seat.status = 'booked'
         vehicle_seat.save(update_fields=['status', 'updated_at'])
+
+    notify_node_seat_booked(
+        active_trip.id,
+        vehicle.id,
+        [{'vehicle_seat_id': vehicle_seat.id, 'side': vehicle_seat.side, 'number': vehicle_seat.number}],
+    )
 
     serializer = SeatBookingSerializer(booking)
     return Response(serializer.data, status=status.HTTP_201_CREATED)

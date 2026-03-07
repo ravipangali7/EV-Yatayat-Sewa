@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from rest_framework import status
 
 from ..models import Trip, Vehicle, Route, Location, VehicleSchedule, VehicleTicketBooking, SeatBooking, VehicleSeat
+from ..services.notify_node import notify_node_seat_booked
 from core.models import User, SuperSetting
 
 
@@ -106,13 +107,14 @@ def trip_start_view(request):
         start_place = route.start_point
         start_addr = getattr(start_place, 'address', None) or f"{start_place.name}"
 
+        scheduled_created_seats = []
         with transaction.atomic():
-            trip_id = f"T-{today.strftime('%Y%m%d')}-{vehicle.id}-{uuid.uuid4().hex[:8]}"
+            trip_id_str = f"T-{today.strftime('%Y%m%d')}-{vehicle.id}-{uuid.uuid4().hex[:8]}"
             trip = Trip.objects.create(
                 vehicle=vehicle,
                 driver=user,
                 route=route,
-                trip_id=trip_id,
+                trip_id=trip_id_str,
                 start_time=now,
                 end_time=None,
                 is_scheduled=True,
@@ -152,6 +154,9 @@ def trip_start_view(request):
                         trip_amount=amount_per_seat,
                         is_paid=True,
                     )
+                    scheduled_created_seats.append({'vehicle_seat_id': vseat.id, 'side': vseat.side, 'number': vseat.number})
+        if scheduled_created_seats:
+            notify_node_seat_booked(trip.id, vehicle.id, scheduled_created_seats)
         return Response(_trip_to_response(trip), status=status.HTTP_201_CREATED)
 
     # Check for scheduled trip prompt

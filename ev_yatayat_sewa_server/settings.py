@@ -204,7 +204,11 @@ NCHL_BASE_URL = os.environ.get('NCHL_BASE_URL', 'https://login.connectips.com').
 # Resolve PFX path: relative to BASE_DIR or absolute
 if not os.path.isabs(NCHL_PFX_PATH):
     NCHL_PFX_PATH = str(BASE_DIR / NCHL_PFX_PATH)
-FRONTEND_URL = os.environ.get('FRONTEND_URL', '').rstrip('/')
+
+FRONTEND_URL = os.environ.get('FRONTEND_URL', 'evyatayatsewa.com').rstrip('/')
+
+# Node real-time server (seat-booked webhook, trip socket)
+NODE_BASE_URL = os.environ.get('NODE_BASE_URL', 'node.evyatayatsewa.com').rstrip('/')
 
 # Walkie-Talkie: directory where Node saves recording files (same as Node RECORDINGS_PATH in production)
 WALKIETALKIE_RECORDINGS_DIR = '/home/luna/apps/EV-Yatayat-Sewa-Node/recordings'
