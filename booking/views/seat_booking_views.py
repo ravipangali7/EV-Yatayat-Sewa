@@ -652,15 +652,30 @@ def direct_seat_booking_preview_view(request):
     })
 
 
+def _parse_vehicle_seats_list(request):
+    """Return list of vehicle_seat IDs from request (vehicle_seats array or single vehicle_seat)."""
+    data = getattr(request, 'data', None) or {}
+    vehicle_seats = data.get('vehicle_seats')
+    if vehicle_seats is not None:
+        if isinstance(vehicle_seats, list):
+            return [str(s) for s in vehicle_seats if s]
+        return []
+    vehicle_seat_id = request.POST.get('vehicle_seat') or data.get('vehicle_seat')
+    if vehicle_seat_id:
+        return [str(vehicle_seat_id)]
+    return []
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def direct_seat_booking_create_view(request):
     """Direct seat booking by logged-in user: payment first (wallet), then create SeatBooking.
-    Body: vehicle, vehicle_seat, check_in_lat, check_in_lng, check_in_datetime, check_in_address, trip_amount, destination_place (optional).
-    Eligibility: vehicle has active_route, running trip, and latest location within 5 km of check-in.
+    Body: vehicle; either vehicle_seat (single) or vehicle_seats (list); check_in_*, trip_amount; destination_place (optional).
+    For multiple seats: one deduction, N bookings created atomically.
+    Eligibility: vehicle has active_route, running trip, and latest location within range.
     """
     vehicle_id = request.POST.get('vehicle') or request.data.get('vehicle')
-    vehicle_seat_id = request.POST.get('vehicle_seat') or request.data.get('vehicle_seat')
+    vehicle_seat_ids = _parse_vehicle_seats_list(request)
     check_in_lat = request.POST.get('check_in_lat') or request.data.get('check_in_lat')
     check_in_lng = request.POST.get('check_in_lng') or request.data.get('check_in_lng')
     check_in_datetime = request.POST.get('check_in_datetime') or request.data.get('check_in_datetime')
@@ -668,8 +683,10 @@ def direct_seat_booking_create_view(request):
     trip_amount_val = request.POST.get('trip_amount') or request.data.get('trip_amount')
     destination_place_id = request.POST.get('destination_place') or request.data.get('destination_place') or None
 
-    if not vehicle_id or not vehicle_seat_id:
-        return Response({'error': 'vehicle and vehicle_seat are required'}, status=status.HTTP_400_BAD_REQUEST)
+    if not vehicle_id:
+        return Response({'error': 'vehicle is required'}, status=status.HTTP_400_BAD_REQUEST)
+    if not vehicle_seat_ids:
+        return Response({'error': 'vehicle_seat or vehicle_seats are required'}, status=status.HTTP_400_BAD_REQUEST)
     if not check_in_lat or not check_in_lng:
         return Response({'error': 'check_in_lat and check_in_lng are required'}, status=status.HTTP_400_BAD_REQUEST)
     if not check_in_datetime:
@@ -681,12 +698,16 @@ def direct_seat_booking_create_view(request):
         vehicle = Vehicle.objects.select_related('active_route').get(pk=vehicle_id)
     except Vehicle.DoesNotExist:
         return Response({'error': 'Vehicle not found'}, status=status.HTTP_404_NOT_FOUND)
-    try:
-        vehicle_seat = VehicleSeat.objects.get(pk=vehicle_seat_id, vehicle=vehicle)
-    except VehicleSeat.DoesNotExist:
-        return Response({'error': 'Vehicle seat not found'}, status=status.HTTP_404_NOT_FOUND)
-    if vehicle_seat.status != 'available':
-        return Response({'error': 'Seat is not available'}, status=status.HTTP_400_BAD_REQUEST)
+
+    vehicle_seats = []
+    for sid in vehicle_seat_ids:
+        try:
+            vs = VehicleSeat.objects.get(pk=sid, vehicle=vehicle)
+            if vs.status != 'available':
+                return Response({'error': f'Seat {vs.side}{vs.number} is not available'}, status=status.HTTP_400_BAD_REQUEST)
+            vehicle_seats.append(vs)
+        except VehicleSeat.DoesNotExist:
+            return Response({'error': 'Vehicle seat not found'}, status=status.HTTP_404_NOT_FOUND)
 
     user_lat = Decimal(str(check_in_lat))
     user_lng = Decimal(str(check_in_lng))
@@ -695,18 +716,18 @@ def direct_seat_booking_create_view(request):
         return Response({'error': err}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        check_in_datetime = datetime.fromisoformat(str(check_in_datetime).replace('Z', '+00:00'))
+        check_in_dt = datetime.fromisoformat(str(check_in_datetime).replace('Z', '+00:00'))
     except Exception:
         return Response({'error': 'Invalid check_in_datetime format'}, status=status.HTTP_400_BAD_REQUEST)
 
-    trip_amount = Decimal(str(trip_amount_val))
-    if trip_amount <= 0:
+    trip_amount_total = Decimal(str(trip_amount_val))
+    if trip_amount_total <= 0:
         return Response({'error': 'trip_amount must be positive'}, status=status.HTTP_400_BAD_REQUEST)
 
     wallet = Wallet.objects.filter(user=request.user).first()
     if not wallet:
         return Response({'error': 'Wallet not found', 'code': 'no_wallet'}, status=status.HTTP_400_BAD_REQUEST)
-    if wallet.balance < trip_amount:
+    if wallet.balance < trip_amount_total:
         return Response(
             {'error': 'Insufficient wallet balance. Please recharge.', 'code': 'insufficient_balance'},
             status=status.HTTP_400_BAD_REQUEST,
@@ -720,40 +741,48 @@ def direct_seat_booking_create_view(request):
             return Response({'error': 'Destination place not found'}, status=status.HTTP_404_NOT_FOUND)
 
     active_trip = Trip.objects.filter(vehicle=vehicle, end_time__isnull=True).order_by('-start_time').first()
+    n = len(vehicle_seats)
+    amount_per_booking = (trip_amount_total / n).quantize(Decimal('0.01'))
+
+    seat_remarks = ', '.join(f'{vs.side}{vs.number}' for vs in vehicle_seats)
 
     with db_transaction.atomic():
-        wallet.balance -= trip_amount
+        wallet.balance -= trip_amount_total
         wallet.save(update_fields=['balance', 'updated_at'])
         create_wallet_transaction(
             wallet=wallet,
             user=request.user,
-            amount=trip_amount,
+            amount=trip_amount_total,
             type='deducted',
-            remarks=f'Direct seat booking - {vehicle.name} seat {vehicle_seat.side}{vehicle_seat.number}',
+            remarks=f'Direct seat booking - {vehicle.name} seats {seat_remarks}',
             status='success',
         )
-        booking = SeatBooking.objects.create(
-            user=request.user,
-            is_guest=False,
-            vehicle=vehicle,
-            vehicle_seat=vehicle_seat,
-            trip=active_trip,
-            check_in_lat=user_lat,
-            check_in_lng=user_lng,
-            check_in_datetime=check_in_datetime,
-            check_in_address=check_in_address or '',
-            destination_place=destination_place,
-            trip_amount=trip_amount,
-            is_paid=True,
-        )
-        vehicle_seat.status = 'booked'
-        vehicle_seat.save(update_fields=['status', 'updated_at'])
+        bookings = []
+        for vs in vehicle_seats:
+            booking = SeatBooking.objects.create(
+                user=request.user,
+                is_guest=False,
+                vehicle=vehicle,
+                vehicle_seat=vs,
+                trip=active_trip,
+                check_in_lat=user_lat,
+                check_in_lng=user_lng,
+                check_in_datetime=check_in_dt,
+                check_in_address=check_in_address or '',
+                destination_place=destination_place,
+                trip_amount=amount_per_booking,
+                is_paid=True,
+            )
+            bookings.append(booking)
+            vs.status = 'booked'
+            vs.save(update_fields=['status', 'updated_at'])
 
     notify_node_seat_booked(
         active_trip.id,
         vehicle.id,
-        [{'vehicle_seat_id': vehicle_seat.id, 'side': vehicle_seat.side, 'number': vehicle_seat.number}],
+        [{'vehicle_seat_id': vs.id, 'side': vs.side, 'number': vs.number} for vs in vehicle_seats],
     )
 
-    serializer = SeatBookingSerializer(booking)
-    return Response(serializer.data, status=status.HTTP_201_CREATED)
+    if n == 1:
+        return Response(SeatBookingSerializer(bookings[0]).data, status=status.HTTP_201_CREATED)
+    return Response(SeatBookingSerializer(bookings, many=True).data, status=status.HTTP_201_CREATED)
