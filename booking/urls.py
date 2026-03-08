@@ -64,7 +64,7 @@ urlpatterns = [
     path('seat-bookings/direct-book-preview/', seat_booking_views.direct_seat_booking_preview_view, name='direct-seat-booking-preview'),
     path('seat-bookings/direct-book/', seat_booking_views.direct_seat_booking_create_view, name='direct-seat-booking-create'),
     path('seat-bookings/switch/', seat_booking_views.seat_booking_switch_view, name='seat-booking-switch'),
-    # checkout is registered in ev_yatayat_sewa_server.urls so it always resolves on server
+    path('seat-bookings/checkout/', seat_booking_views.seat_booking_checkout_view, name='seat-booking-checkout'),
     path('seat-bookings/<int:pk>/', seat_booking_views.seat_booking_detail_get_view, name='seat-booking-detail-get'),
     path('seat-bookings/<int:pk>/edit/', seat_booking_views.seat_booking_detail_post_view, name='seat-booking-detail-post'),
     path('seat-bookings/<int:pk>/delete/', seat_booking_views.seat_booking_delete_get_view, name='seat-booking-delete'),

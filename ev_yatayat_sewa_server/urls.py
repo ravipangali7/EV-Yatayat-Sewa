@@ -24,8 +24,9 @@ from booking.views.seat_booking_views import seat_booking_checkout_view
 urlpatterns = [
     # Media files - must be before admin URLs to bypass authentication
     re_path(r'^media/(?P<path>.*)$', serve_media, name='media'),
-    # Explicit checkout route so it is always registered (avoids 404 if booking.urlpatterns order or load differs on server)
-    path('api/seat-bookings/checkout/', seat_booking_checkout_view, name='seat-booking-checkout'),
+    # Seat booking checkout: with/without api/ prefix and with/without trailing slash (proxy/server variations)
+    re_path(r'^api/seat-bookings/checkout/?$', seat_booking_checkout_view, name='seat-booking-checkout'),
+    re_path(r'^seat-bookings/checkout/?$', seat_booking_checkout_view, name='seat-booking-checkout-no-prefix'),
     # Booking first so /api/trips/current-stop/ etc. are matched; then core (auth, users, wallets); then walkietalkie
     path('api/', include('booking.urls')),
     path('api/', include('core.urls')),
