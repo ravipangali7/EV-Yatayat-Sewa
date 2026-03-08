@@ -52,6 +52,7 @@ INSTALLED_APPS = [
 AUTH_USER_MODEL = 'core.User'
 
 MIDDLEWARE = [
+    'booking.middleware.SeatBookingCheckoutFallbackMiddleware',  # handle checkout before URL resolution
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
