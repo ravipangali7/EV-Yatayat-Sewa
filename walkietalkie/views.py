@@ -93,6 +93,10 @@ def validate_token_view(request):
         group_ids = [str(gid) for gid in group_ids]
     if getattr(user, 'is_driver', False):
         group_ids.append(f'direct:{user.id}')
+        admin_ids = User.objects.filter(Q(is_staff=True) | Q(is_superuser=True)).values_list('id', flat=True)
+        group_ids.extend(f'direct:{aid}' for aid in admin_ids)
+    if getattr(user, 'is_staff', False) or getattr(user, 'is_superuser', False):
+        group_ids.append(f'direct:{user.id}')
     return Response({
         'user_id': user.id,
         'username': user.username,
@@ -111,6 +115,26 @@ def drivers_list_view(request):
     drivers = User.objects.filter(is_driver=True).order_by('name', 'username')
     out = []
     for u in drivers:
+        avatar = None
+        if getattr(u, 'profile_picture', None) and u.profile_picture:
+            avatar = request.build_absolute_uri(u.profile_picture.url)
+        out.append({
+            'id': u.id,
+            'name': getattr(u, 'name', None) or u.username,
+            'avatar': avatar,
+        })
+    return Response(out)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admins_list_view(request):
+    """List admins (staff/superuser) for drivers (for direct PTT to admin)."""
+    if not getattr(request.user, 'is_driver', False):
+        return Response({'detail': 'Drivers only.'}, status=status.HTTP_403_FORBIDDEN)
+    admins_qs = User.objects.filter(Q(is_staff=True) | Q(is_superuser=True)).order_by('name', 'username')
+    out = []
+    for u in admins_qs:
         avatar = None
         if getattr(u, 'profile_picture', None) and u.profile_picture:
             avatar = request.build_absolute_uri(u.profile_picture.url)
