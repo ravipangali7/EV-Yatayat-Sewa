@@ -15,6 +15,8 @@ def notify_node_seat_booked(trip_id, vehicle_id, seats):
     base_url = getattr(settings, 'NODE_BASE_URL', '') or ''
     if not base_url:
         return
+    if not base_url.startswith(('http://', 'https://')):
+        base_url = 'https://' + base_url
     url = f'{base_url}/internal/seat-booked'
     headers = {'Content-Type': 'application/json'}
     payload = {
