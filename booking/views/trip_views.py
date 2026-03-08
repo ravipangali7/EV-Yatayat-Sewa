@@ -154,7 +154,15 @@ def trip_start_view(request):
                         trip_amount=amount_per_seat,
                         is_paid=True,
                     )
-                    scheduled_created_seats.append({'vehicle_seat_id': vseat.id, 'side': vseat.side, 'number': vseat.number})
+                    user_name = (tb.user.name if tb.user else None) or (tb.user.username if tb.user else None) or 'Guest'
+                    scheduled_created_seats.append({
+                        'vehicle_seat_id': vseat.id,
+                        'side': vseat.side,
+                        'number': vseat.number,
+                        'user_name': user_name,
+                        'from_address': start_addr,
+                        'to_name': '',
+                    })
         if scheduled_created_seats:
             notify_node_seat_booked(trip.id, vehicle.id, scheduled_created_seats)
         return Response(_trip_to_response(trip), status=status.HTTP_201_CREATED)

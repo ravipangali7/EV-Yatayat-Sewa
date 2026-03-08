@@ -286,10 +286,19 @@ def _create_seat_booking(request):
     vehicle_seat.save()
 
     if active_trip:
+        user_name = (user.name or getattr(user, 'username', None) or 'Guest') if user else 'Guest'
+        to_name = (destination_place.name if destination_place else '') or ''
         notify_node_seat_booked(
             active_trip.id,
             vehicle.id,
-            [{'vehicle_seat_id': vehicle_seat.id, 'side': vehicle_seat.side, 'number': vehicle_seat.number}],
+            [{
+                'vehicle_seat_id': vehicle_seat.id,
+                'side': vehicle_seat.side,
+                'number': vehicle_seat.number,
+                'user_name': user_name,
+                'from_address': check_in_address or '',
+                'to_name': to_name,
+            }],
         )
 
     serializer = SeatBookingSerializer(booking)
@@ -791,10 +800,19 @@ def direct_seat_booking_create_view(request):
             vs.status = 'booked'
             vs.save(update_fields=['status', 'updated_at'])
 
+    user_name = (request.user.name or getattr(request.user, 'username', None) or 'Guest') or 'Guest'
+    to_name = (destination_place.name if destination_place else '') or ''
     notify_node_seat_booked(
         active_trip.id,
         vehicle.id,
-        [{'vehicle_seat_id': vs.id, 'side': vs.side, 'number': vs.number} for vs in vehicle_seats],
+        [{
+            'vehicle_seat_id': vs.id,
+            'side': vs.side,
+            'number': vs.number,
+            'user_name': user_name,
+            'from_address': check_in_address or '',
+            'to_name': to_name,
+        } for vs in vehicle_seats],
     )
 
     if n == 1:

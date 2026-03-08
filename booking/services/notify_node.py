@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 def notify_node_seat_booked(trip_id, vehicle_id, seats):
     """
     POST to Node /internal/seat-booked so driver receives seat_booked over socket.
-    seats: list of dicts with vehicle_seat_id, side, number.
+    seats: list of dicts with vehicle_seat_id, side, number; optionally user_name, from_address, to_name.
     Fire-and-forget; do not raise or delay the request on failure.
     """
     base_url = getattr(settings, 'NODE_BASE_URL', '') or ''
@@ -19,10 +19,24 @@ def notify_node_seat_booked(trip_id, vehicle_id, seats):
         base_url = 'https://' + base_url
     url = f'{base_url}/internal/seat-booked'
     headers = {'Content-Type': 'application/json'}
+    seat_list = []
+    for s in seats:
+        item = {
+            'vehicle_seat_id': str(s.get('vehicle_seat_id')),
+            'side': s.get('side', ''),
+            'number': s.get('number', 0),
+        }
+        if s.get('user_name') is not None:
+            item['user_name'] = str(s['user_name'])
+        if s.get('from_address') is not None:
+            item['from_address'] = str(s['from_address'])
+        if s.get('to_name') is not None:
+            item['to_name'] = str(s['to_name'])
+        seat_list.append(item)
     payload = {
         'trip_id': str(trip_id),
         'vehicle_id': str(vehicle_id),
-        'seats': [{'vehicle_seat_id': str(s.get('vehicle_seat_id')), 'side': s.get('side', ''), 'number': s.get('number', 0)} for s in seats],
+        'seats': seat_list,
     }
     try:
         resp = requests.post(url, json=payload, headers=headers, timeout=3)
