@@ -74,3 +74,34 @@ class WalkieTalkieRecording(models.Model):
 
     def __str__(self):
         return f"Recording by {self.user} in {self.group} at {self.started_at}"
+
+
+class AdminDriverVoiceMessage(models.Model):
+    """Direct voice message between admin (staff) and a single driver. Stored when PTT in direct:driverId room ends."""
+    id = models.BigAutoField(primary_key=True)
+    sender = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='sent_direct_voice_messages'
+    )
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='received_direct_voice_messages'
+    )
+    file_path = models.CharField(max_length=1024)
+    duration_seconds = models.FloatField(null=True, blank=True)
+    sample_rate = models.IntegerField(null=True, blank=True, default=48000)
+    read_at = models.DateTimeField(null=True, blank=True, db_column='read_at')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
+
+    class Meta:
+        db_table = 'walkietalkie_direct_voice_messages'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['recipient', 'created_at']),
+            models.Index(fields=['sender', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.sender} -> {self.recipient} at {self.created_at}"

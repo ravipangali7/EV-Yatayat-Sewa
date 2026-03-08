@@ -8,4 +8,7 @@ urlpatterns = [
     path('walkietalkie/validate-token/', views.validate_token_view),
     path('walkietalkie/recordings/', views.recording_list_create_view),
     path('walkietalkie/recordings/<int:pk>/play/', views.recording_play_view),
+    path('walkietalkie/direct-messages/', views.direct_message_list_create_view),
+    path('walkietalkie/direct-messages/<int:pk>/play/', views.direct_message_play_view),
+    path('walkietalkie/direct-messages/<int:pk>/', views.direct_message_partial_update_view),
 ]

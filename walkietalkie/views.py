@@ -1,4 +1,5 @@
 import os
+from django.db.models import Q
 from django.http import FileResponse
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -6,13 +7,16 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.authtoken.models import Token
 
+from django.utils import timezone
 from core.models import User
-from .models import WalkieTalkieGroup, WalkieTalkieGroupMember, WalkieTalkieRecording
+from .models import WalkieTalkieGroup, WalkieTalkieGroupMember, WalkieTalkieRecording, AdminDriverVoiceMessage
 from .serializers import (
     WalkieTalkieGroupSerializer,
     WalkieTalkieGroupMemberSerializer,
     WalkieTalkieRecordingSerializer,
     WalkieTalkieRecordingCreateSerializer,
+    AdminDriverVoiceMessageSerializer,
+    AdminDriverVoiceMessageCreateSerializer,
 )
 
 
@@ -205,3 +209,124 @@ def recording_play_view(request, pk):
     if rec.storage_key:
         return Response({'detail': 'Storage key playback not implemented.'}, status=status.HTTP_501_NOT_IMPLEMENTED)
     return Response({'detail': 'Recording file not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+
+def _resolve_direct_message_file_path(msg, base_dir):
+    """Resolve file path for AdminDriverVoiceMessage; return (full_path, error_response or None)."""
+    if not msg.file_path:
+        return None, Response({'detail': 'Recording file not found.'}, status=status.HTTP_404_NOT_FOUND)
+    safe_path = os.path.normpath(msg.file_path.replace('\\', '/')).lstrip('/')
+    if '..' in safe_path:
+        return None, Response({'detail': 'Invalid file path.'}, status=status.HTTP_400_BAD_REQUEST)
+    full_path = os.path.normpath(os.path.join(base_dir, safe_path))
+    if not full_path.startswith(base_dir):
+        return None, Response({'detail': 'Invalid file path.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not os.path.isfile(full_path):
+        return None, Response({'detail': 'Recording file not found.'}, status=status.HTTP_404_NOT_FOUND)
+    return full_path, None
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def direct_message_list_create_view(request):
+    """
+    GET: List direct voice messages. Query params: driver_id (admin sees messages with that driver),
+         recipient=me (driver sees messages where they are recipient).
+    POST: Create direct message (called by Node after saving PCM for direct PTT).
+    """
+    if request.method == 'GET':
+        user = request.user
+        is_staff = getattr(user, 'is_staff', False)
+        driver_id = request.query_params.get('driver_id')
+        recipient_me = request.query_params.get('recipient') == 'me'
+
+        if is_staff and driver_id:
+            try:
+                driver_id = int(driver_id)
+            except (TypeError, ValueError):
+                return Response({'detail': 'Invalid driver_id.'}, status=status.HTTP_400_BAD_REQUEST)
+            qs = AdminDriverVoiceMessage.objects.filter(
+                Q(sender=user) | Q(recipient=user)
+            ).filter(
+                Q(sender_id=driver_id) | Q(recipient_id=driver_id)
+            ).select_related('sender', 'recipient').order_by('-created_at')[:100]
+        elif recipient_me:
+            qs = AdminDriverVoiceMessage.objects.filter(
+                Q(sender=user) | Q(recipient=user)
+            ).select_related('sender', 'recipient').order_by('-created_at')[:100]
+        elif is_staff:
+            qs = AdminDriverVoiceMessage.objects.all().select_related('sender', 'recipient').order_by('-created_at')[:100]
+        else:
+            qs = AdminDriverVoiceMessage.objects.filter(
+                Q(sender=user) | Q(recipient=user)
+            ).select_related('sender', 'recipient').order_by('-created_at')[:100]
+        serializer = AdminDriverVoiceMessageSerializer(qs, many=True)
+        return Response(serializer.data)
+
+    # POST: create (Node or authenticated user)
+    serializer = AdminDriverVoiceMessageCreateSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    data = serializer.validated_data
+    sender_id = data['sender_id']
+    recipient_id = data['recipient_id']
+    if request.user.id != sender_id and not getattr(request.user, 'is_staff', False):
+        return Response({'detail': 'Can only create as yourself or as staff.'}, status=status.HTTP_403_FORBIDDEN)
+    try:
+        sender = User.objects.get(pk=sender_id)
+        recipient = User.objects.get(pk=recipient_id)
+    except User.DoesNotExist:
+        return Response({'detail': 'Sender or recipient not found.'}, status=status.HTTP_404_NOT_FOUND)
+    is_sender_staff = getattr(sender, 'is_staff', False) or getattr(sender, 'is_superuser', False)
+    is_recipient_driver = getattr(recipient, 'is_driver', False)
+    if not ((is_sender_staff and is_recipient_driver) or (getattr(recipient, 'is_staff', False) and getattr(sender, 'is_driver', False))):
+        return Response({'detail': 'Direct messages are between staff and driver only.'}, status=status.HTTP_400_BAD_REQUEST)
+    msg = AdminDriverVoiceMessage.objects.create(
+        sender=sender,
+        recipient=recipient,
+        file_path=data['file_path'],
+        duration_seconds=data.get('duration_seconds'),
+        sample_rate=data.get('sample_rate'),
+    )
+    return Response(
+        AdminDriverVoiceMessageSerializer(msg).data,
+        status=status.HTTP_201_CREATED
+    )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def direct_message_play_view(request, pk):
+    """Stream a direct voice message file. User must be sender or recipient."""
+    from django.conf import settings
+    try:
+        msg = AdminDriverVoiceMessage.objects.select_related('sender', 'recipient').get(pk=pk)
+    except AdminDriverVoiceMessage.DoesNotExist:
+        return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+    if request.user.id != msg.sender_id and request.user.id != msg.recipient_id:
+        return Response({'detail': 'Not allowed.'}, status=status.HTTP_403_FORBIDDEN)
+    base_dir = os.path.abspath(settings.WALKIETALKIE_RECORDINGS_DIR)
+    full_path, err = _resolve_direct_message_file_path(msg, base_dir)
+    if err:
+        return err
+    return FileResponse(
+        open(full_path, 'rb'),
+        as_attachment=False,
+        content_type='application/octet-stream',
+        filename=os.path.basename(full_path),
+    )
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def direct_message_partial_update_view(request, pk):
+    """Mark message as read (recipient only)."""
+    try:
+        msg = AdminDriverVoiceMessage.objects.get(pk=pk)
+    except AdminDriverVoiceMessage.DoesNotExist:
+        return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+    if request.user.id != msg.recipient_id:
+        return Response({'detail': 'Only recipient can mark as read.'}, status=status.HTTP_403_FORBIDDEN)
+    msg.read_at = timezone.now()
+    msg.save(update_fields=['read_at'])
+    return Response(AdminDriverVoiceMessageSerializer(msg).data)

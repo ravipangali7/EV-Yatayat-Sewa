@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import WalkieTalkieGroup, WalkieTalkieGroupMember, WalkieTalkieRecording
+from .models import WalkieTalkieGroup, WalkieTalkieGroupMember, WalkieTalkieRecording, AdminDriverVoiceMessage
 
 
 class WalkieTalkieGroupMemberInline(admin.TabularInline):
@@ -29,3 +29,11 @@ class WalkieTalkieRecordingAdmin(admin.ModelAdmin):
     list_filter = ('group',)
     raw_id_fields = ('group', 'user')
     readonly_fields = ('started_at', 'ended_at', 'created_at')
+
+
+@admin.register(AdminDriverVoiceMessage)
+class AdminDriverVoiceMessageAdmin(admin.ModelAdmin):
+    list_display = ('id', 'sender', 'recipient', 'duration_seconds', 'read_at', 'created_at')
+    list_filter = ('created_at',)
+    raw_id_fields = ('sender', 'recipient')
+    readonly_fields = ('created_at',)

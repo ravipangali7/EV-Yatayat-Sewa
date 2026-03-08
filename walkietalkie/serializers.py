@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import WalkieTalkieGroup, WalkieTalkieGroupMember, WalkieTalkieRecording
+from .models import WalkieTalkieGroup, WalkieTalkieGroupMember, WalkieTalkieRecording, AdminDriverVoiceMessage
 from django.conf import settings
 
 
@@ -76,3 +76,43 @@ class WalkieTalkieRecordingCreateSerializer(serializers.Serializer):
     duration_seconds = serializers.FloatField(required=False, allow_null=True)
     file_size_bytes = serializers.IntegerField(required=False, allow_null=True)
     sample_rate = serializers.IntegerField(required=False, allow_null=True)
+
+
+class AdminDriverVoiceMessageCreateSerializer(serializers.Serializer):
+    """Payload for Node to create a direct voice message after PTT in direct:driverId room."""
+    sender_id = serializers.IntegerField()
+    recipient_id = serializers.IntegerField()
+    file_path = serializers.CharField(max_length=1024)
+    duration_seconds = serializers.FloatField(required=False, allow_null=True)
+    sample_rate = serializers.IntegerField(required=False, allow_null=True)
+
+
+def _user_display_name(user):
+    if not user:
+        return None
+    return getattr(user, 'name', None) or getattr(user, 'username', None) or f'User #{user.id}'
+
+
+class AdminDriverVoiceMessageSerializer(serializers.ModelSerializer):
+    """List/detail with sender and recipient names."""
+    sender_name = serializers.SerializerMethodField()
+    recipient_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AdminDriverVoiceMessage
+        fields = (
+            'id', 'sender', 'recipient', 'sender_name', 'recipient_name',
+            'file_path', 'duration_seconds', 'sample_rate', 'read_at', 'created_at'
+        )
+        read_only_fields = ('id', 'created_at', 'read_at')
+
+    def get_sender_name(self, obj):
+        return _user_display_name(obj.sender)
+
+    def get_recipient_name(self, obj):
+        return _user_display_name(obj.recipient)
+
+
+class AdminDriverVoiceMessageMarkReadSerializer(serializers.Serializer):
+    """Optional PATCH: set read_at (driver marks message as read)."""
+    read_at = serializers.DateTimeField(required=False)
