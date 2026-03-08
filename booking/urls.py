@@ -57,17 +57,19 @@ urlpatterns = [
     path('vehicles/<int:vehicle_id>/images/<int:pk>/edit/', vehicle_views.vehicle_image_detail_post_view, name='vehicle-image-detail-post'),
     path('vehicles/<int:vehicle_id>/images/<int:pk>/delete/', vehicle_views.vehicle_image_delete_get_view, name='vehicle-image-delete'),
     
-    # Seat Booking endpoints (literal paths before <int:pk> so e.g. /checkout/ is not matched as pk)
+    # Seat Booking endpoints
     path('seat-bookings/', seat_booking_views.seat_booking_list_get_view, name='seat-booking-list-get'),
     path('seat-bookings/create/', seat_booking_views.seat_booking_list_post_view, name='seat-booking-list-post'),
+    path('seat-bookings/<int:pk>/', seat_booking_views.seat_booking_detail_get_view, name='seat-booking-detail-get'),
+    path('seat-bookings/<int:pk>/edit/', seat_booking_views.seat_booking_detail_post_view, name='seat-booking-detail-post'),
+    path('seat-bookings/<int:pk>/delete/', seat_booking_views.seat_booking_delete_get_view, name='seat-booking-delete'),
+    
+    # Seat Booking special endpoints
     path('seat-bookings/book/', seat_booking_views.seat_booking_create_view, name='seat-booking-create'),
     path('seat-bookings/direct-book-preview/', seat_booking_views.direct_seat_booking_preview_view, name='direct-seat-booking-preview'),
     path('seat-bookings/direct-book/', seat_booking_views.direct_seat_booking_create_view, name='direct-seat-booking-create'),
     path('seat-bookings/switch/', seat_booking_views.seat_booking_switch_view, name='seat-booking-switch'),
     path('seat-bookings/checkout/', seat_booking_views.seat_booking_checkout_view, name='seat-booking-checkout'),
-    path('seat-bookings/<int:pk>/', seat_booking_views.seat_booking_detail_get_view, name='seat-booking-detail-get'),
-    path('seat-bookings/<int:pk>/edit/', seat_booking_views.seat_booking_detail_post_view, name='seat-booking-detail-post'),
-    path('seat-bookings/<int:pk>/delete/', seat_booking_views.seat_booking_delete_get_view, name='seat-booking-delete'),
     # Trip endpoints
     path('trips/start/', trip_views.trip_start_view, name='trip-start'),
     path('trips/', trip_views.trip_list_get_view, name='trip-list-get'),
