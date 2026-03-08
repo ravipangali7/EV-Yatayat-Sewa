@@ -58,7 +58,7 @@ class TransactionAdmin(admin.ModelAdmin):
     search_fields = ('user__username', 'user__phone', 'user__name', 'remarks')
     readonly_fields = ('created_at', 'updated_at')
     raw_id_fields = ('user', 'wallet')
-    date_hierarchy = 'created_at'
+    # date_hierarchy removed: requires MySQL timezone tables when USE_TZ=True (Django ValueError on changelist)
 
 
 @admin.register(Card)
