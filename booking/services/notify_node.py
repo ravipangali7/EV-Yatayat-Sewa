@@ -44,3 +44,33 @@ def notify_node_seat_booked(trip_id, vehicle_id, seats):
             logger.warning('Node seat-booked webhook failed: %s %s', resp.status_code, resp.text[:200])
     except requests.exceptions.RequestException as e:
         logger.warning('Node seat-booked webhook error: %s', e)
+
+
+def notify_node_trip_location(trip_id, lat, lng, course=None, speed=None):
+    """
+    POST to Node /internal/trip-location so clients (e.g. user live tracking) receive trip_location over socket.
+    trip_id: the trip's string trip_id (e.g. from Trip.trip_id).
+    Fire-and-forget; do not raise or delay the request on failure.
+    """
+    base_url = getattr(settings, 'NODE_BASE_URL', '') or ''
+    if not base_url:
+        return
+    if not base_url.startswith(('http://', 'https://')):
+        base_url = 'https://' + base_url
+    url = f'{base_url}/internal/trip-location'
+    headers = {'Content-Type': 'application/json'}
+    payload = {
+        'trip_id': str(trip_id),
+        'lat': float(lat),
+        'lng': float(lng),
+    }
+    if course is not None:
+        payload['course'] = float(course)
+    if speed is not None:
+        payload['speed'] = float(speed)
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=2)
+        if resp.status_code >= 400:
+            logger.warning('Node trip-location webhook failed: %s %s', resp.status_code, resp.text[:200])
+    except requests.exceptions.RequestException as e:
+        logger.warning('Node trip-location webhook error: %s', e)

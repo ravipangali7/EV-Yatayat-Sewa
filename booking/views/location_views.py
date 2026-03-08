@@ -7,6 +7,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 
 from ..models import Location, Vehicle, Trip
+from ..services.notify_node import notify_node_trip_location
 
 
 def _location_to_response(loc):
@@ -62,6 +63,17 @@ def location_list_post_view(request):
         speed=Decimal(str(speed)) if speed is not None else None,
         course=Decimal(str(course)) if course is not None else None,
     )
+    if trip:
+        try:
+            notify_node_trip_location(
+                trip.trip_id,
+                float(loc.latitude),
+                float(loc.longitude),
+                float(loc.course) if loc.course is not None else None,
+                float(loc.speed) if loc.speed is not None else None,
+            )
+        except Exception:
+            pass
     return Response(_location_to_response(loc), status=status.HTTP_201_CREATED)
 
 
