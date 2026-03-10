@@ -89,6 +89,14 @@ def _build_active_route_details(route):
     }
 
 
+def _get_vehicle_last_location(vehicle):
+    """Return (last_lat, last_lng, last_location_at) for vehicle or (None, None, None)."""
+    loc = Location.objects.filter(vehicle=vehicle).order_by('-created_at').first()
+    if not loc:
+        return None, None, None
+    return loc.latitude, loc.longitude, loc.created_at
+
+
 @api_view(['GET'])
 def vehicle_list_get_view(request):
     """List all vehicles"""
@@ -780,7 +788,8 @@ def vehicle_detail_get_view(request, pk):
         }
     
     active_route_details = _build_active_route_details(vehicle.active_route)
-    
+    last_lat, last_lng, last_location_at = _get_vehicle_last_location(vehicle)
+
     return Response({
         'id': str(vehicle.id),
         'imei': vehicle.imei or '',
@@ -810,6 +819,82 @@ def vehicle_detail_get_view(request, pk):
         'images': images,
         'created_at': vehicle.created_at.isoformat(),
         'updated_at': vehicle.updated_at.isoformat(),
+        'last_latitude': str(last_lat) if last_lat is not None else None,
+        'last_longitude': str(last_lng) if last_lng is not None else None,
+        'last_location_at': last_location_at.isoformat() if last_location_at else None,
+    })
+
+
+@api_view(['GET'])
+def vehicle_direct_book_info_get_view(request, pk):
+    """Return real-time seat details, active route with stop points, and last location
+    for use when opening the short-trip (direct) booking flow. Response is VehicleNearby-like.
+    """
+    try:
+        vehicle = Vehicle.objects.prefetch_related(
+            'drivers', 'routes', 'seats', 'images',
+            'active_route__stop_points__place',
+        ).select_related('active_driver', 'active_route', 'active_route__start_point', 'active_route__end_point').get(pk=pk)
+    except Vehicle.DoesNotExist:
+        return Response({'error': 'Vehicle not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    last_lat, last_lng, last_location_at = _get_vehicle_last_location(vehicle)
+    has_running_trip = Trip.objects.filter(vehicle=vehicle, end_time__isnull=True).exists()
+    can_book = (
+        vehicle.active_route_id is not None
+        and has_running_trip
+        and last_lat is not None
+        and last_lng is not None
+    )
+
+    seats = []
+    for seat in vehicle.seats.all().order_by('side', 'number'):
+        seats.append({
+            'id': str(seat.id),
+            'vehicle': str(seat.vehicle.id),
+            'side': seat.side,
+            'number': seat.number,
+            'status': seat.status,
+            'created_at': seat.created_at.isoformat(),
+            'updated_at': seat.updated_at.isoformat(),
+        })
+
+    active_driver_details = None
+    if vehicle.active_driver:
+        active_driver_details = {
+            'id': str(vehicle.active_driver.id),
+            'username': vehicle.active_driver.username,
+            'phone': vehicle.active_driver.phone,
+            'email': vehicle.active_driver.email or '',
+            'name': vehicle.active_driver.name or '',
+            'is_driver': vehicle.active_driver.is_driver,
+            'is_active': vehicle.active_driver.is_active,
+        }
+    active_route_details = _build_active_route_details(vehicle.active_route)
+
+    return Response({
+        'id': str(vehicle.id),
+        'imei': vehicle.imei or '',
+        'name': vehicle.name,
+        'vehicle_no': vehicle.vehicle_no,
+        'vehicle_type': vehicle.vehicle_type,
+        'odometer': str(vehicle.odometer),
+        'overspeed_limit': vehicle.overspeed_limit,
+        'description': vehicle.description or '',
+        'featured_image': vehicle.featured_image.url if vehicle.featured_image else None,
+        'active_driver': str(vehicle.active_driver.id) if vehicle.active_driver else None,
+        'active_driver_details': active_driver_details,
+        'active_route': str(vehicle.active_route.id) if vehicle.active_route else None,
+        'active_route_details': active_route_details,
+        'active_trip': _get_active_trip_for_vehicle(vehicle),
+        'is_active': vehicle.is_active,
+        'seat_layout': getattr(vehicle, 'seat_layout', []) or [],
+        'seats': seats,
+        'last_latitude': str(last_lat) if last_lat is not None else '',
+        'last_longitude': str(last_lng) if last_lng is not None else '',
+        'last_location_at': last_location_at.isoformat() if last_location_at else None,
+        'distance_km': 0,
+        'can_book': can_book,
     })
 
 
@@ -1723,7 +1808,8 @@ def vehicle_my_active_get_view(request):
         }
     
     active_route_details = _build_active_route_details(vehicle.active_route)
-    
+    last_lat, last_lng, last_location_at = _get_vehicle_last_location(vehicle)
+
     return Response({
         'vehicle': {
             'id': str(vehicle.id),
@@ -1754,5 +1840,8 @@ def vehicle_my_active_get_view(request):
             'images': images,
             'created_at': vehicle.created_at.isoformat(),
             'updated_at': vehicle.updated_at.isoformat(),
+            'last_latitude': str(last_lat) if last_lat is not None else None,
+            'last_longitude': str(last_lng) if last_lng is not None else None,
+            'last_location_at': last_location_at.isoformat() if last_location_at else None,
         }
     }, status=status.HTTP_200_OK)
