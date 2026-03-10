@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from rest_framework import status
 
 from ..models import Trip, Vehicle, Route, Location, VehicleSchedule, VehicleTicketBooking, SeatBooking, VehicleSeat
+from ..route_order import get_route_place_order, get_route_ordered_points
 from ..services.notify_node import notify_node_seat_booked
 from core.models import User, SuperSetting
 
@@ -47,6 +48,7 @@ def _trip_to_response(trip):
         'remarks': trip.remarks or '',
         'is_scheduled': trip.is_scheduled,
         'vehicle_schedule': str(trip.vehicle_schedule_id) if trip.vehicle_schedule_id else None,
+        'reverse_direction': getattr(trip, 'reverse_direction', False),
         'created_at': trip.created_at.isoformat(),
         'updated_at': trip.updated_at.isoformat(),
     }
@@ -104,7 +106,8 @@ def trip_start_view(request):
         except VehicleSchedule.DoesNotExist:
             return Response({'error': 'Vehicle schedule not found or not for today'}, status=status.HTTP_404_NOT_FOUND)
         route = vs.route
-        start_place = route.start_point
+        reverse = getattr(vs, 'reverse_direction', False)
+        start_place = route.end_point if reverse else route.start_point
         start_addr = getattr(start_place, 'address', None) or f"{start_place.name}"
 
         scheduled_created_seats = []
@@ -119,6 +122,7 @@ def trip_start_view(request):
                 end_time=None,
                 is_scheduled=True,
                 vehicle_schedule=vs,
+                reverse_direction=reverse,
             )
             for tb in vs.ticket_bookings.all():
                 seat_list = _seat_to_list(tb.seat)
@@ -181,11 +185,12 @@ def trip_start_view(request):
         lng_f = float(longitude)
         # Schedules for this vehicle, today, time within ± minute_coverage of now
         now_minutes = now.hour * 60 + now.minute
-        for vs in VehicleSchedule.objects.filter(vehicle=vehicle, date=today).select_related('route', 'route__start_point').prefetch_related('ticket_bookings'):
+        for vs in VehicleSchedule.objects.filter(vehicle=vehicle, date=today).select_related('route', 'route__start_point', 'route__end_point').prefetch_related('ticket_bookings'):
             vs_minutes = vs.time.hour * 60 + vs.time.minute if vs.time else 0
             if abs(now_minutes - vs_minutes) > minute_coverage:
                 continue
-            start_place = vs.route.start_point
+            reverse = getattr(vs, 'reverse_direction', False)
+            start_place = vs.route.end_point if reverse else vs.route.start_point
             dist = haversine_km(lat_f, lng_f, float(start_place.latitude), float(start_place.longitude))
             if dist <= point_radius_km:
                 tickets = []
@@ -207,11 +212,19 @@ def trip_start_view(request):
                         'route_name': vs.route.name,
                         'start_point_name': vs.route.start_point.name,
                         'end_point_name': vs.route.end_point.name,
+                        'reverse_direction': reverse,
                     },
                     'tickets': tickets,
                 }, status=status.HTTP_200_OK)
 
-    # Normal trip
+    # Normal trip: optional reverse_direction (only when route is bidirectional)
+    reverse_direction = request.POST.get('reverse_direction') or request.data.get('reverse_direction')
+    if reverse_direction is not None:
+        reverse_direction = reverse_direction is True or (isinstance(reverse_direction, str) and reverse_direction.lower() == 'true')
+    else:
+        reverse_direction = False
+    if reverse_direction and not getattr(vehicle.active_route, 'is_bidirectional', False):
+        reverse_direction = False
     trip_id = f"T-{today.strftime('%Y%m%d')}-{vehicle.id}-{uuid.uuid4().hex[:8]}"
     trip = Trip.objects.create(
         vehicle=vehicle,
@@ -222,6 +235,7 @@ def trip_start_view(request):
         end_time=None,
         is_scheduled=False,
         vehicle_schedule=None,
+        reverse_direction=reverse_direction,
     )
     return Response(_trip_to_response(trip), status=status.HTTP_201_CREATED)
 
@@ -245,7 +259,7 @@ def trip_end_view(request, pk):
         return Response({'error': 'latitude and longitude are required'}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        trip = Trip.objects.select_related('vehicle', 'route', 'route__end_point').get(pk=pk)
+        trip = Trip.objects.select_related('vehicle', 'route', 'route__start_point', 'route__end_point').get(pk=pk)
     except Trip.DoesNotExist:
         return Response({'error': 'Trip not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -268,7 +282,8 @@ def trip_end_view(request, pk):
             'pending_seat_bookings': pending_labels,
         }, status=status.HTTP_400_BAD_REQUEST)
 
-    end_place = trip.route.end_point
+    reverse = getattr(trip, 'reverse_direction', False)
+    end_place = trip.route.start_point if reverse else trip.route.end_point
     distance_km = haversine_km(
         float(latitude), float(longitude),
         float(end_place.latitude), float(end_place.longitude)
@@ -418,21 +433,26 @@ def trip_detail_get_view(request, pk):
     except (SuperSetting.DoesNotExist, (TypeError, ValueError)):
         data['point_cover_radius_km'] = 0.5
 
-    # Route with stop_points (place_id, order, announcement_text, lat/lng) for Flutter announcements
+    # Route with stop_points in effective traversal order (forward or reverse)
     route = trip.route
     if route:
+        reverse = getattr(trip, 'reverse_direction', False)
+        points = get_route_ordered_points(route, reverse)
         stop_points = []
-        for rsp in route.stop_points.all().order_by('order'):
-            place = rsp.place
+        for order_idx, (kind, place, rsp) in enumerate(points):
+            if kind == 'start' or kind == 'end':
+                announcement_text = ''
+            else:
+                announcement_text = getattr(rsp, 'announcement_text', '') or '' if rsp else ''
             has_destination_booking = SeatBooking.objects.filter(
                 trip=trip,
                 destination_place_id=place.id,
                 check_out_datetime__isnull=True,
             ).exists()
             stop_points.append({
-                'place_id': str(rsp.place_id),
-                'order': rsp.order,
-                'announcement_text': getattr(rsp, 'announcement_text', '') or '',
+                'place_id': str(place.id),
+                'order': order_idx,
+                'announcement_text': announcement_text,
                 'place_name': place.name if place else None,
                 'place_code': place.code if place else None,
                 'latitude': str(place.latitude) if place and place.latitude is not None else None,
@@ -555,13 +575,8 @@ def trip_current_stop_view(request):
         header = ''
 
     route = trip.route
-
-    # Ordered points: (kind, place, route_stop_point or None for start/end)
-    points = []
-    points.append(('start', route.start_point, None))
-    for rsp in route.stop_points.all().order_by('order'):
-        points.append(('stop', rsp.place, rsp))
-    points.append(('end', route.end_point, None))
+    reverse = getattr(trip, 'reverse_direction', False)
+    points = get_route_ordered_points(route, reverse)
 
     lat_f, lng_f = float(lat), float(lng)
     for _kind, place, rsp in points:

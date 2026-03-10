@@ -43,6 +43,7 @@ def _get_active_trip_for_vehicle(vehicle):
         'trip_id': trip.trip_id,
         'start_time': trip.start_time.isoformat() if trip.start_time else None,
         'end_time': None,
+        'reverse_direction': getattr(trip, 'reverse_direction', False),
     }
 
 

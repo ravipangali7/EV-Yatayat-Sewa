@@ -161,6 +161,7 @@ class VehicleSchedule(models.Model):
     date = models.DateField()
     time = models.TimeField()
     price = models.DecimalField(max_digits=10, decimal_places=2)
+    reverse_direction = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
     updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
 
@@ -187,6 +188,7 @@ class Trip(models.Model):
     remarks = models.TextField(blank=True, null=True)
     is_scheduled = models.BooleanField(default=False)
     vehicle_schedule = models.ForeignKey(VehicleSchedule, on_delete=models.SET_NULL, null=True, blank=True, related_name='trips')
+    reverse_direction = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
     updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
 

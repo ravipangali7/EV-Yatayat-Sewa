@@ -6,20 +6,30 @@ from rest_framework.response import Response
 from rest_framework import status
 
 from ..models import VehicleSchedule, Vehicle, Route, Place, VehicleTicketBooking, RouteStopPoint
+from ..route_order import get_route_place_order
 
 
 def _route_place_order(route):
-    """Return dict place_id -> order (0=start, 1..n=stops, n+1=end)."""
-    order_map = {route.start_point_id: 0}
-    for i, sp in enumerate(route.stop_points.all().order_by('order')):
-        order_map[sp.place_id] = i + 1
-    order_map[route.end_point_id] = len(order_map)  # end is last
-    return order_map
+    """Return dict place_id -> order (0=start, 1..n=stops, n+1=end). Forward direction."""
+    return get_route_place_order(route, reverse=False)
+
+
+def _schedule_place_order(schedule):
+    """Return dict place_id -> order for this schedule's effective direction."""
+    return get_route_place_order(schedule.route, getattr(schedule, 'reverse_direction', False))
 
 
 def _route_contains_place_before(route, from_place_id, to_place_id):
-    """True if both places are on route and from comes before to."""
+    """True if both places are on route and from comes before to (forward direction)."""
     order_map = _route_place_order(route)
+    if from_place_id not in order_map or to_place_id not in order_map:
+        return False
+    return order_map[from_place_id] < order_map[to_place_id]
+
+
+def _schedule_contains_place_before(schedule, from_place_id, to_place_id):
+    """True if both places are on schedule's route and from comes before to in schedule direction."""
+    order_map = _schedule_place_order(schedule)
     if from_place_id not in order_map or to_place_id not in order_map:
         return False
     return order_map[from_place_id] < order_map[to_place_id]
@@ -38,6 +48,7 @@ def _schedule_to_response(s):
         'date': s.date.isoformat(),
         'time': s.time.strftime('%H:%M:%S') if s.time else None,
         'price': str(s.price),
+        'reverse_direction': getattr(s, 'reverse_direction', False),
         'created_at': s.created_at.isoformat(),
         'updated_at': s.updated_at.isoformat(),
     }
@@ -88,6 +99,7 @@ def _schedule_to_response_expanded(s, request):
         'date': s.date.isoformat(),
         'time': (s.time.strftime('%H:%M') if s.time else None),
         'price': str(s.price),
+        'reverse_direction': getattr(s, 'reverse_direction', False),
         'created_at': s.created_at.isoformat(),
         'updated_at': s.updated_at.isoformat(),
         'route_details': route_data,
@@ -118,23 +130,62 @@ def vehicle_schedule_start_places_view(request):
 
 @api_view(['GET'])
 def vehicle_schedule_end_places_view(request):
-    """Places that are 'after' from_place on some route (stops + end), so 'to' can be any downstream place."""
+    """Places that are 'after' from_place on some route (stops + end), so 'to' can be any downstream place.
+    Optional: vehicle_schedule_id or (route_id + reverse_direction) to use that direction; else forward order.
+    """
     from_place_id = request.query_params.get('from')
     if not from_place_id:
         return Response({'error': 'from (place id) is required'}, status=status.HTTP_400_BAD_REQUEST)
-    route_ids = VehicleSchedule.objects.values_list('route_id', flat=True).distinct()
-    routes = Route.objects.filter(id__in=route_ids).prefetch_related(
-        'start_point', 'end_point', 'stop_points__place'
-    )
+    from_place_id = int(from_place_id)
+    vehicle_schedule_id = request.query_params.get('vehicle_schedule_id')
+    route_id = request.query_params.get('route_id')
+    reverse_direction = request.query_params.get('reverse_direction')
+    if reverse_direction is not None:
+        reverse_direction = reverse_direction.lower() in ('true', '1', 'yes')
+
     place_ids = set()
-    for route in routes:
-        order_map = _route_place_order(route)
-        if int(from_place_id) not in order_map:
-            continue
-        from_order = order_map[int(from_place_id)]
-        for pid, o in order_map.items():
-            if o > from_order:
-                place_ids.add(pid)
+    if vehicle_schedule_id:
+        try:
+            s = VehicleSchedule.objects.select_related('route').get(pk=vehicle_schedule_id)
+            order_map = _schedule_place_order(s)
+            if from_place_id in order_map:
+                from_order = order_map[from_place_id]
+                for pid, o in order_map.items():
+                    if o > from_order:
+                        place_ids.add(pid)
+        except VehicleSchedule.DoesNotExist:
+            pass
+    elif route_id and reverse_direction is not None:
+        try:
+            route = Route.objects.prefetch_related('start_point', 'end_point', 'stop_points__place').get(pk=route_id)
+            order_map = get_route_place_order(route, reverse=reverse_direction)
+            if from_place_id in order_map:
+                from_order = order_map[from_place_id]
+                for pid, o in order_map.items():
+                    if o > from_order:
+                        place_ids.add(pid)
+        except Route.DoesNotExist:
+            pass
+    else:
+        route_ids = VehicleSchedule.objects.values_list('route_id', flat=True).distinct()
+        routes = Route.objects.filter(id__in=route_ids).prefetch_related(
+            'start_point', 'end_point', 'stop_points__place'
+        )
+        for route in routes:
+            order_map = _route_place_order(route)
+            if from_place_id not in order_map:
+                continue
+            from_order = order_map[from_place_id]
+            for pid, o in order_map.items():
+                if o > from_order:
+                    place_ids.add(pid)
+            if route.is_bidirectional:
+                order_map_reverse = get_route_place_order(route, reverse=True)
+                if from_place_id in order_map_reverse:
+                    from_order_rev = order_map_reverse[from_place_id]
+                    for pid, o in order_map_reverse.items():
+                        if o > from_order_rev:
+                            place_ids.add(pid)
     places = Place.objects.filter(id__in=place_ids).order_by('name')
     return Response([
         {'id': str(p.id), 'name': p.name, 'code': p.code}
@@ -221,20 +272,27 @@ def vehicle_schedule_list_get_view(request):
             Q(vehicle__vehicle_no__icontains=search) |
             Q(route__name__icontains=search)
         )
-    # Segment search: both from_place and to_place => filter by route containing both in order
+    # Segment search: both from_place and to_place => filter by schedule's effective order
     if from_place and to_place:
         from_place_id = int(from_place)
         to_place_id = int(to_place)
-        # Filter schedules whose route has from_place before to_place
         valid_schedule_ids = []
         for s in queryset:
-            if _route_contains_place_before(s.route, from_place_id, to_place_id):
+            if _schedule_contains_place_before(s, from_place_id, to_place_id):
                 valid_schedule_ids.append(s.id)
         queryset = queryset.filter(id__in=valid_schedule_ids)
     elif from_place:
-        queryset = queryset.filter(route__start_point_id=from_place)
+        # Effective start = from_place: start_point when forward, end_point when reverse
+        queryset = queryset.filter(
+            Q(route__start_point_id=from_place, reverse_direction=False) |
+            Q(route__end_point_id=from_place, reverse_direction=True)
+        )
     elif to_place:
-        queryset = queryset.filter(route__end_point_id=to_place)
+        # Effective end = to_place
+        queryset = queryset.filter(
+            Q(route__end_point_id=to_place, reverse_direction=False) |
+            Q(route__start_point_id=to_place, reverse_direction=True)
+        )
 
     page = int(request.query_params.get('page', 1))
     per_page = int(request.query_params.get('per_page', 10))
@@ -270,7 +328,7 @@ def vehicle_schedule_list_get_view(request):
                 layout = getattr(s.vehicle, 'seat_layout', None) or []
                 total_seats = sum(1 for c in layout if c == 'x')
             if from_place and to_place:
-                order_map = _route_place_order(s.route)
+                order_map = _schedule_place_order(s)
                 from_order = order_map.get(int(from_place), -1)
                 to_order = order_map.get(int(to_place), -1)
                 booked_for_segment = _booked_seats_for_segment(s, from_order, to_order, order_map)
@@ -320,7 +378,15 @@ def vehicle_schedule_list_post_view(request):
             t = datetime.strptime(ts[:8], '%H:%M:%S').time()
     except ValueError:
         return Response({'error': 'Invalid time format (use HH:MM or HH:MM:SS)'}, status=status.HTTP_400_BAD_REQUEST)
-    s = VehicleSchedule.objects.create(vehicle=vehicle, route=route, date=d, time=t, price=Decimal(str(price)))
+    reverse_direction = request.POST.get('reverse_direction') or request.data.get('reverse_direction')
+    if reverse_direction is not None:
+        reverse_direction = reverse_direction is True or (isinstance(reverse_direction, str) and reverse_direction.lower() == 'true')
+    else:
+        reverse_direction = False
+    s = VehicleSchedule.objects.create(
+        vehicle=vehicle, route=route, date=d, time=t, price=Decimal(str(price)),
+        reverse_direction=reverse_direction,
+    )
     return Response(_schedule_to_response(s), status=status.HTTP_201_CREATED)
 
 
@@ -363,6 +429,9 @@ def vehicle_schedule_detail_post_view(request, pk):
             s.route = Route.objects.get(pk=data['route'])
         except Route.DoesNotExist:
             pass
+    if 'reverse_direction' in data:
+        rd = data['reverse_direction']
+        s.reverse_direction = rd is True or (isinstance(rd, str) and rd.lower() == 'true')
     s.save()
     return Response(_schedule_to_response(s))
 

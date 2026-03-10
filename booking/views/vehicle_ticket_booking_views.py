@@ -11,6 +11,7 @@ from django.http import HttpResponse
 from django.db import transaction as db_transaction
 
 from ..models import VehicleTicketBooking, VehicleSchedule, VehicleSeat, Place
+from ..route_order import get_route_place_order
 from core.models import User, Wallet
 from core.services.wallet_transaction import create_wallet_transaction
 
@@ -152,13 +153,7 @@ def vehicle_ticket_booking_list_post_view(request):
     pickup_point = None
     destination_point = None
     if pickup_point_id or destination_point_id:
-        route = vs.route
-        # Build place_id -> order: start=0, stop_points by order 1..n, end=n+1
-        place_order = {route.start_point_id: 0}
-        stops = list(route.stop_points.all().order_by('order'))
-        for i, sp in enumerate(stops):
-            place_order[sp.place_id] = i + 1
-        place_order[route.end_point_id] = len(stops) + 1
+        place_order = get_route_place_order(vs.route, getattr(vs, 'reverse_direction', False))
         if pickup_point_id:
             try:
                 pickup_point = Place.objects.get(pk=pickup_point_id)
@@ -205,12 +200,7 @@ def vehicle_ticket_booking_list_post_view(request):
             return Response({'error': f'Seat {side}{number} does not exist on this vehicle'}, status=status.HTTP_400_BAD_REQUEST)
 
     # Already booked seats: by segment overlap when pickup/destination provided, else whole schedule
-    route = vs.route
-    place_order = {route.start_point_id: 0}
-    stops = list(route.stop_points.all().order_by('order'))
-    for i, sp in enumerate(stops):
-        place_order[sp.place_id] = i + 1
-    place_order[route.end_point_id] = len(stops) + 1
+    place_order = get_route_place_order(vs.route, getattr(vs, 'reverse_direction', False))
     from_order = place_order.get(pickup_point.id) if pickup_point else 0
     to_order = place_order.get(destination_point.id) if destination_point else (max(place_order.values()) + 1)
 
