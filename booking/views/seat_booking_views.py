@@ -580,6 +580,8 @@ def seat_booking_checkout_view(request):
             balance_before = driver_wallet.balance
             Wallet.objects.filter(pk=driver_wallet.pk).update(to_pay=F('to_pay') + booking.trip_amount)
             driver_wallet.refresh_from_db()
+            driver_label = (booking.trip.driver.name or booking.trip.driver.phone) if booking.trip and booking.trip.driver else 'N/A'
+            trip_label = booking.trip.trip_id if booking.trip else 'N/A'
             Transaction.objects.create(
                 wallet=driver_wallet,
                 user=driver,
@@ -588,7 +590,16 @@ def seat_booking_checkout_view(request):
                 balance_after=driver_wallet.balance,
                 type='add',
                 status='success',
-                remarks=f'Trip amount (driver, to_pay) - Seat booking #{booking.id}',
+                remarks=(
+                    f'Seat trip fare | Booking #{booking.id}'
+                    f' | Vehicle: {booking.vehicle.vehicle_no} ({booking.vehicle.name})'
+                    f' | Driver: {driver_label}'
+                    f' | Trip: {trip_label}'
+                    f' | From: {booking.check_in_address or "N/A"}'
+                    f' \u2192 To: {booking.check_out_address or "N/A"}'
+                    f' | Distance: {booking.trip_distance} km'
+                    f' | Fare: Rs. {booking.trip_amount}'
+                ),
             )
 
     serializer = SeatBookingSerializer(booking)
@@ -772,12 +783,24 @@ def direct_seat_booking_create_view(request):
     with db_transaction.atomic():
         wallet.balance -= trip_amount_total
         wallet.save(update_fields=['balance', 'updated_at'])
+        direct_driver_label = (active_trip.driver.name or active_trip.driver.phone) if active_trip and active_trip.driver else 'N/A'
+        direct_trip_label = active_trip.trip_id if active_trip else 'N/A'
+        direct_to_label = destination_place.name if destination_place else 'N/A'
         create_wallet_transaction(
             wallet=wallet,
             user=request.user,
             amount=trip_amount_total,
             type='deducted',
-            remarks=f'Direct seat booking - {vehicle.name} seats {seat_remarks}',
+            remarks=(
+                f'Direct seat booking'
+                f' | Vehicle: {vehicle.vehicle_no} ({vehicle.name})'
+                f' | Driver: {direct_driver_label}'
+                f' | Trip: {direct_trip_label}'
+                f' | From: {check_in_address or "N/A"}'
+                f' \u2192 To: {direct_to_label}'
+                f' | Seat(s): {seat_remarks}'
+                f' | Total Fare: Rs. {trip_amount_total}'
+            ),
             status='success',
         )
         bookings = []
