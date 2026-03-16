@@ -15,6 +15,19 @@ from ..services import nchl_connectips
 from booking.models import VehicleTicketBooking
 
 
+def _format_seat_remarks(seat_field):
+    """Format seat field for transaction remarks, e.g. 'A1, B2'."""
+    if not seat_field:
+        return ''
+    if isinstance(seat_field, list):
+        seats = [s for s in seat_field if isinstance(s, dict) and s.get('side') is not None and s.get('number') is not None]
+    elif isinstance(seat_field, dict) and seat_field.get('side') is not None and seat_field.get('number') is not None:
+        seats = [seat_field]
+    else:
+        return ''
+    return ', '.join(f"{s.get('side', '')}{s.get('number', '')}" for s in seats)
+
+
 MIN_AMOUNT_NPR = 10
 PURPOSE_WALLET_DEPOSIT = 'wallet_deposit'
 PURPOSE_CARD_TOPUP = 'card_topup'
@@ -267,6 +280,8 @@ def payment_validate_view(request):
         if pt.purpose == PURPOSE_VEHICLE_TICKET_BOOKING and pt.vehicle_ticket_booking_id:
             b = VehicleTicketBooking.objects.select_related('vehicle_schedule').get(pk=pt.vehicle_ticket_booking_id)
             if not b.is_paid and wallet.balance >= amount:
+                seat_remarks = _format_seat_remarks(b.seat)
+                seat_suffix = f' | Seat(s): {seat_remarks}' if seat_remarks else ''
                 wallet.balance -= amount
                 wallet.save(update_fields=['balance', 'updated_at'])
                 create_wallet_transaction(
@@ -274,7 +289,7 @@ def payment_validate_view(request):
                     user=pt.user,
                     amount=amount,
                     type='deducted',
-                    remarks=f'Ticket payment {b.pnr}',
+                    remarks=f'Ticket payment {b.pnr}{seat_suffix}',
                     status='success',
                 )
                 b.is_paid = True
@@ -293,7 +308,7 @@ def payment_validate_view(request):
                         user=pt.user,
                         amount=commission,
                         type='add',
-                        remarks=f'Commission for {b.pnr}',
+                        remarks=f'Commission for {b.pnr}{seat_suffix}',
                         status='success',
                     )
 

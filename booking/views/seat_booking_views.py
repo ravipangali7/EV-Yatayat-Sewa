@@ -592,6 +592,7 @@ def seat_booking_checkout_view(request):
                 status='success',
                 remarks=(
                     f'Seat trip fare | Booking #{booking.id}'
+                    f' | Seat: {vehicle_seat.side}{vehicle_seat.number}'
                     f' | Vehicle: {booking.vehicle.vehicle_no} ({booking.vehicle.name})'
                     f' | Driver: {driver_label}'
                     f' | Trip: {trip_label}'

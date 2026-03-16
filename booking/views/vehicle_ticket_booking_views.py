@@ -25,6 +25,15 @@ def _seat_to_list(seat):
     return []
 
 
+def _format_seat_remarks(seat_field):
+    """Format seat field for transaction remarks, e.g. 'A1, B2'."""
+    seats = _seat_to_list(seat_field) if seat_field else []
+    if not seats:
+        return ''
+    parts = [f"{s.get('side', '')}{s.get('number', '')}" for s in seats]
+    return ', '.join(parts)
+
+
 def _ticket_booking_to_response(b, include_schedule_details=False):
     seat = b.seat
     if not isinstance(seat, list):
@@ -295,6 +304,9 @@ def vehicle_ticket_booking_pay_view(request, pk):
             commission = amount * (request.user.ticket_commission / Decimal('100'))
         except (TypeError, ValueError):
             pass
+    seat_remarks = _format_seat_remarks(b.seat)
+    seat_suffix = f' | Seat(s): {seat_remarks}' if seat_remarks else ''
+
     with db_transaction.atomic():
         wallet.balance -= amount
         wallet.save(update_fields=['balance', 'updated_at'])
@@ -303,7 +315,7 @@ def vehicle_ticket_booking_pay_view(request, pk):
             user=request.user,
             amount=amount,
             type='deducted',
-            remarks=f'Ticket payment {b.pnr}',
+            remarks=f'Ticket payment {b.pnr}{seat_suffix}',
             status='success',
         )
         b.is_paid = True
@@ -316,7 +328,7 @@ def vehicle_ticket_booking_pay_view(request, pk):
                 user=request.user,
                 amount=commission,
                 type='add',
-                remarks=f'Commission for {b.pnr}',
+                remarks=f'Commission for {b.pnr}{seat_suffix}',
                 status='success',
             )
     return Response(_ticket_booking_to_response(b, include_schedule_details=True))
