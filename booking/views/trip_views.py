@@ -168,7 +168,7 @@ def trip_start_view(request):
                         'to_name': '',
                     })
         if scheduled_created_seats:
-            notify_node_seat_booked(trip.id, vehicle.id, scheduled_created_seats)
+            notify_node_seat_booked(trip.trip_id, vehicle.id, scheduled_created_seats)
         return Response(_trip_to_response(trip), status=status.HTTP_201_CREATED)
 
     # Check for scheduled trip prompt

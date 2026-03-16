@@ -289,7 +289,7 @@ def _create_seat_booking(request):
         user_name = (user.name or getattr(user, 'username', None) or 'Guest') if user else 'Guest'
         to_name = (destination_place.name if destination_place else '') or ''
         notify_node_seat_booked(
-            active_trip.id,
+            active_trip.trip_id,
             vehicle.id,
             [{
                 'vehicle_seat_id': vehicle_seat.id,
@@ -826,7 +826,7 @@ def direct_seat_booking_create_view(request):
     user_name = (request.user.name or getattr(request.user, 'username', None) or 'Guest') or 'Guest'
     to_name = (destination_place.name if destination_place else '') or ''
     notify_node_seat_booked(
-        active_trip.id,
+        active_trip.trip_id,
         vehicle.id,
         [{
             'vehicle_seat_id': vs.id,
