@@ -65,14 +65,22 @@ def _build_media_url(request, path):
 
 
 def _schedule_to_response_expanded(s, request):
-    """Response with nested route (start/end place) and vehicle (name, vehicle_no, featured_image, images)."""
+    """Response with nested route (start/end place) and vehicle (name, vehicle_no, featured_image, images).
+    Route start/end are in schedule direction (swapped when reverse_direction is True)."""
     route = s.route
     vehicle = s.vehicle
+    reverse = getattr(s, 'reverse_direction', False)
+    if reverse:
+        first_place = route.end_point
+        last_place = route.start_point
+    else:
+        first_place = route.start_point
+        last_place = route.end_point
     route_data = {
         'id': str(route.id),
         'name': route.name,
-        'start_point': {'id': str(route.start_point.id), 'name': route.start_point.name, 'code': route.start_point.code},
-        'end_point': {'id': str(route.end_point.id), 'name': route.end_point.name, 'code': route.end_point.code},
+        'start_point': {'id': str(first_place.id), 'name': first_place.name, 'code': first_place.code},
+        'end_point': {'id': str(last_place.id), 'name': last_place.name, 'code': last_place.code},
     }
     featured_image = None
     if vehicle.featured_image:

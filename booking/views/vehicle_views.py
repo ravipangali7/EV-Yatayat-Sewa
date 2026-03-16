@@ -8,6 +8,7 @@ from decimal import Decimal
 import json
 from datetime import datetime
 from ..models import Vehicle, VehicleSeat, VehicleImage, Route, Trip, Location
+from ..route_order import get_route_ordered_points
 from core.models import User, SuperSetting
 
 
@@ -47,44 +48,53 @@ def _get_active_trip_for_vehicle(vehicle):
     }
 
 
-def _build_active_route_details(route):
-    """Build active_route_details dict from a Route instance, including stop_points."""
+def _build_active_route_details(route, reverse=False):
+    """Build active_route_details dict from a Route instance, including stop_points.
+    When reverse=True (e.g. active trip is return), start/end and stop_points are in traversal order."""
     if not route:
         return None
+    points = get_route_ordered_points(route, reverse=reverse)
+    if not points:
+        return None
+    # First and last are start/end; middle are stops
+    start_kind, start_place, _ = points[0]
+    end_kind, end_place, _ = points[-1]
     stop_points = []
-    for sp in route.stop_points.all().order_by('order'):
+    for order_idx, (kind, place, rsp) in enumerate(points[1:-1]):
         stop_points.append({
-            'id': str(sp.id),
-            'route': str(sp.route.id),
-            'place': str(sp.place.id),
+            'id': str(rsp.id),
+            'route': str(route.id),
+            'place': str(place.id),
             'place_details': {
-                'id': str(sp.place.id),
-                'name': sp.place.name,
-                'code': sp.place.code,
-                'latitude': str(sp.place.latitude),
-                'longitude': str(sp.place.longitude),
+                'id': str(place.id),
+                'name': place.name,
+                'code': place.code,
+                'latitude': str(place.latitude),
+                'longitude': str(place.longitude),
             },
-            'order': sp.order,
-            'created_at': sp.created_at.isoformat(),
-            'updated_at': sp.updated_at.isoformat(),
+            'order': order_idx,
+            'created_at': rsp.created_at.isoformat(),
+            'updated_at': rsp.updated_at.isoformat(),
         })
     return {
         'id': str(route.id),
         'name': route.name,
         'is_bidirectional': route.is_bidirectional,
+        'start_point': str(start_place.id),
         'start_point_details': {
-            'id': str(route.start_point.id),
-            'name': route.start_point.name,
-            'code': route.start_point.code,
-            'latitude': str(route.start_point.latitude),
-            'longitude': str(route.start_point.longitude),
+            'id': str(start_place.id),
+            'name': start_place.name,
+            'code': start_place.code,
+            'latitude': str(start_place.latitude),
+            'longitude': str(start_place.longitude),
         },
+        'end_point': str(end_place.id),
         'end_point_details': {
-            'id': str(route.end_point.id),
-            'name': route.end_point.name,
-            'code': route.end_point.code,
-            'latitude': str(route.end_point.latitude),
-            'longitude': str(route.end_point.longitude),
+            'id': str(end_place.id),
+            'name': end_place.name,
+            'code': end_place.code,
+            'latitude': str(end_place.latitude),
+            'longitude': str(end_place.longitude),
         },
         'stop_points': stop_points,
     }
@@ -221,8 +231,10 @@ def vehicle_list_get_view(request):
                 'is_active': vehicle.active_driver.is_active,
             }
         
-        # Build active_route_details
-        active_route_details = _build_active_route_details(vehicle.active_route)
+        # Build active_route_details (in trip direction when vehicle has active trip)
+        active_trip = _get_active_trip_for_vehicle(vehicle)
+        reverse = active_trip.get('reverse_direction', False) if active_trip else False
+        active_route_details = _build_active_route_details(vehicle.active_route, reverse=reverse)
         
         results.append({
             'id': str(vehicle.id),
@@ -242,7 +254,7 @@ def vehicle_list_get_view(request):
             'route_details': route_details,
             'active_route': str(vehicle.active_route.id) if vehicle.active_route else None,
             'active_route_details': active_route_details,
-            'active_trip': _get_active_trip_for_vehicle(vehicle),
+            'active_trip': active_trip,
             'is_active': vehicle.is_active,
             'bill_book': vehicle.bill_book or '',
             'bill_book_expiry_date': vehicle.bill_book_expiry_date.isoformat() if vehicle.bill_book_expiry_date else None,
@@ -401,7 +413,9 @@ def vehicle_nearby_get_view(request):
                 'is_driver': vehicle.active_driver.is_driver,
                 'is_active': vehicle.active_driver.is_active,
             }
-        active_route_details = _build_active_route_details(vehicle.active_route)
+        active_trip = _get_active_trip_for_vehicle(vehicle)
+        reverse = active_trip.get('reverse_direction', False) if active_trip else False
+        active_route_details = _build_active_route_details(vehicle.active_route, reverse=reverse)
 
         results.append({
             'id': str(vehicle.id),
@@ -421,7 +435,7 @@ def vehicle_nearby_get_view(request):
             'route_details': route_details,
             'active_route': str(vehicle.active_route.id) if vehicle.active_route else None,
             'active_route_details': active_route_details,
-            'active_trip': _get_active_trip_for_vehicle(vehicle),
+            'active_trip': active_trip,
             'is_active': vehicle.is_active,
             'seat_layout': getattr(vehicle, 'seat_layout', []) or [],
             'seats': seats,
@@ -672,7 +686,9 @@ def vehicle_list_post_view(request):
             'is_active': vehicle.active_driver.is_active,
         }
     
-    active_route_details = _build_active_route_details(vehicle.active_route)
+    active_trip = _get_active_trip_for_vehicle(vehicle)
+    reverse = active_trip.get('reverse_direction', False) if active_trip else False
+    active_route_details = _build_active_route_details(vehicle.active_route, reverse=reverse)
     
     return Response({
         'id': str(vehicle.id),
@@ -692,7 +708,7 @@ def vehicle_list_post_view(request):
         'route_details': route_details,
         'active_route': str(vehicle.active_route.id) if vehicle.active_route else None,
         'active_route_details': active_route_details,
-        'active_trip': _get_active_trip_for_vehicle(vehicle),
+        'active_trip': active_trip,
         'is_active': vehicle.is_active,
         'bill_book': vehicle.bill_book or '',
         'bill_book_expiry_date': vehicle.bill_book_expiry_date.isoformat() if vehicle.bill_book_expiry_date else None,
@@ -788,7 +804,9 @@ def vehicle_detail_get_view(request, pk):
             'is_active': vehicle.active_driver.is_active,
         }
     
-    active_route_details = _build_active_route_details(vehicle.active_route)
+    active_trip = _get_active_trip_for_vehicle(vehicle)
+    reverse = active_trip.get('reverse_direction', False) if active_trip else False
+    active_route_details = _build_active_route_details(vehicle.active_route, reverse=reverse)
     last_lat, last_lng, last_location_at = _get_vehicle_last_location(vehicle)
 
     return Response({
@@ -809,7 +827,7 @@ def vehicle_detail_get_view(request, pk):
         'route_details': route_details,
         'active_route': str(vehicle.active_route.id) if vehicle.active_route else None,
         'active_route_details': active_route_details,
-        'active_trip': _get_active_trip_for_vehicle(vehicle),
+        'active_trip': active_trip,
         'is_active': vehicle.is_active,
         'bill_book': vehicle.bill_book or '',
         'bill_book_expiry_date': vehicle.bill_book_expiry_date.isoformat() if vehicle.bill_book_expiry_date else None,
@@ -871,7 +889,9 @@ def vehicle_direct_book_info_get_view(request, pk):
             'is_driver': vehicle.active_driver.is_driver,
             'is_active': vehicle.active_driver.is_active,
         }
-    active_route_details = _build_active_route_details(vehicle.active_route)
+    active_trip = _get_active_trip_for_vehicle(vehicle)
+    reverse = active_trip.get('reverse_direction', False) if active_trip else False
+    active_route_details = _build_active_route_details(vehicle.active_route, reverse=reverse)
 
     return Response({
         'id': str(vehicle.id),
@@ -887,7 +907,7 @@ def vehicle_direct_book_info_get_view(request, pk):
         'active_driver_details': active_driver_details,
         'active_route': str(vehicle.active_route.id) if vehicle.active_route else None,
         'active_route_details': active_route_details,
-        'active_trip': _get_active_trip_for_vehicle(vehicle),
+        'active_trip': active_trip,
         'is_active': vehicle.is_active,
         'seat_layout': getattr(vehicle, 'seat_layout', []) or [],
         'seats': seats,
@@ -1155,7 +1175,9 @@ def vehicle_detail_post_view(request, pk):
             'is_active': vehicle.active_driver.is_active,
         }
     
-    active_route_details = _build_active_route_details(vehicle.active_route)
+    active_trip = _get_active_trip_for_vehicle(vehicle)
+    reverse = active_trip.get('reverse_direction', False) if active_trip else False
+    active_route_details = _build_active_route_details(vehicle.active_route, reverse=reverse)
     
     return Response({
         'id': str(vehicle.id),
@@ -1175,7 +1197,7 @@ def vehicle_detail_post_view(request, pk):
         'route_details': route_details,
         'active_route': str(vehicle.active_route.id) if vehicle.active_route else None,
         'active_route_details': active_route_details,
-        'active_trip': _get_active_trip_for_vehicle(vehicle),
+        'active_trip': active_trip,
         'is_active': vehicle.is_active,
         'bill_book': vehicle.bill_book or '',
         'bill_book_expiry_date': vehicle.bill_book_expiry_date.isoformat() if vehicle.bill_book_expiry_date else None,
@@ -1588,7 +1610,9 @@ def vehicle_connect_view(request):
             'is_active': vehicle.active_driver.is_active,
         }
     
-    active_route_details = _build_active_route_details(vehicle.active_route)
+    active_trip = _get_active_trip_for_vehicle(vehicle)
+    reverse = active_trip.get('reverse_direction', False) if active_trip else False
+    active_route_details = _build_active_route_details(vehicle.active_route, reverse=reverse)
     
     return Response({
         'id': str(vehicle.id),
@@ -1608,7 +1632,7 @@ def vehicle_connect_view(request):
         'route_details': route_details,
         'active_route': str(vehicle.active_route.id) if vehicle.active_route else None,
         'active_route_details': active_route_details,
-        'active_trip': _get_active_trip_for_vehicle(vehicle),
+        'active_trip': active_trip,
         'is_active': vehicle.is_active,
         'bill_book': vehicle.bill_book or '',
         'bill_book_expiry_date': vehicle.bill_book_expiry_date.isoformat() if vehicle.bill_book_expiry_date else None,
@@ -1694,7 +1718,9 @@ def vehicle_set_active_route_view(request, vehicle_id):
             'name': vehicle.active_driver.name or '', 'is_driver': vehicle.active_driver.is_driver,
             'is_active': vehicle.active_driver.is_active,
         }
-    active_route_details = _build_active_route_details(vehicle.active_route)
+    active_trip = _get_active_trip_for_vehicle(vehicle)
+    reverse = active_trip.get('reverse_direction', False) if active_trip else False
+    active_route_details = _build_active_route_details(vehicle.active_route, reverse=reverse)
     return Response({
         'id': str(vehicle.id), 'imei': vehicle.imei or '', 'name': vehicle.name,
         'vehicle_no': vehicle.vehicle_no, 'vehicle_type': vehicle.vehicle_type,
@@ -1706,7 +1732,7 @@ def vehicle_set_active_route_view(request, vehicle_id):
         'routes': [str(r.id) for r in vehicle.routes.all()], 'route_details': route_details,
         'active_route': str(vehicle.active_route.id) if vehicle.active_route else None,
         'active_route_details': active_route_details,
-        'active_trip': _get_active_trip_for_vehicle(vehicle), 'is_active': vehicle.is_active,
+        'active_trip': active_trip, 'is_active': vehicle.is_active,
         'bill_book': vehicle.bill_book or '',
         'bill_book_expiry_date': vehicle.bill_book_expiry_date.isoformat() if vehicle.bill_book_expiry_date else None,
         'insurance_expiry_date': vehicle.insurance_expiry_date.isoformat() if vehicle.insurance_expiry_date else None,
@@ -1808,7 +1834,9 @@ def vehicle_my_active_get_view(request):
             'is_active': vehicle.active_driver.is_active,
         }
     
-    active_route_details = _build_active_route_details(vehicle.active_route)
+    active_trip = _get_active_trip_for_vehicle(vehicle)
+    reverse = active_trip.get('reverse_direction', False) if active_trip else False
+    active_route_details = _build_active_route_details(vehicle.active_route, reverse=reverse)
     last_lat, last_lng, last_location_at = _get_vehicle_last_location(vehicle)
 
     return Response({
@@ -1830,7 +1858,7 @@ def vehicle_my_active_get_view(request):
             'route_details': route_details,
             'active_route': str(vehicle.active_route.id) if vehicle.active_route else None,
             'active_route_details': active_route_details,
-            'active_trip': _get_active_trip_for_vehicle(vehicle),
+            'active_trip': active_trip,
             'is_active': vehicle.is_active,
             'bill_book': vehicle.bill_book or '',
             'bill_book_expiry_date': vehicle.bill_book_expiry_date.isoformat() if vehicle.bill_book_expiry_date else None,
