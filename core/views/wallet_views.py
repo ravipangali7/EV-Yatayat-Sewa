@@ -16,6 +16,8 @@ def wallet_list_get_view(request):
     # Get query parameters
     search = request.query_params.get('search', '')
     user_id = request.query_params.get('user', None)
+    is_driver = request.query_params.get('is_driver', None)
+    is_ticket_dealer = request.query_params.get('is_ticket_dealer', None)
     
     # Build queryset
     queryset = Wallet.objects.select_related('user').all()
@@ -29,6 +31,10 @@ def wallet_list_get_view(request):
     
     if user_id:
         queryset = queryset.filter(user_id=user_id)
+    if is_driver is not None:
+        queryset = queryset.filter(user__is_driver=is_driver.lower() == 'true')
+    if is_ticket_dealer is not None:
+        queryset = queryset.filter(user__is_ticket_dealer=is_ticket_dealer.lower() == 'true')
     
     # Pagination
     page = int(request.query_params.get('page', 1))

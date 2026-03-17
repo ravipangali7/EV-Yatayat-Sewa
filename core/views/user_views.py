@@ -13,6 +13,7 @@ def user_list_get_view(request):
     phone_exact = (request.query_params.get('phone') or '').strip()
     search = request.query_params.get('search', '')
     is_driver = request.query_params.get('is_driver', None)
+    is_ticket_dealer = request.query_params.get('is_ticket_dealer', None)
     is_active = request.query_params.get('is_active', None)
 
     # Build queryset
@@ -30,7 +31,8 @@ def user_list_get_view(request):
     
     if is_driver is not None:
         queryset = queryset.filter(is_driver=is_driver.lower() == 'true')
-    
+    if is_ticket_dealer is not None:
+        queryset = queryset.filter(is_ticket_dealer=is_ticket_dealer.lower() == 'true')
     if is_active is not None:
         queryset = queryset.filter(is_active=is_active.lower() == 'true')
     
