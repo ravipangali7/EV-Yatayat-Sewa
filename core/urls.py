@@ -2,6 +2,7 @@ from django.urls import path
 from .views import (
     auth_views,
     user_views,
+    user_analytics_views,
     wallet_views,
     transaction_views,
     super_setting_views,
@@ -27,6 +28,7 @@ urlpatterns = [
     # User endpoints
     path('users/', user_views.user_list_get_view, name='user-list-get'),
     path('users/create/', user_views.user_list_post_view, name='user-list-post'),
+    path('users/<int:user_id>/analytics/', user_analytics_views.user_analytics_view, name='user-analytics'),
     path('users/<int:pk>/', user_views.user_detail_get_view, name='user-detail-get'),
     path('users/<int:pk>/edit/', user_views.user_detail_post_view, name='user-detail-post'),
     path('users/<int:pk>/delete/', user_views.user_delete_get_view, name='user-delete'),
