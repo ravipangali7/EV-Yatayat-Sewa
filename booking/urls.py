@@ -9,6 +9,7 @@ from .views import (
     location_views,
     vehicle_schedule_views,
     vehicle_ticket_booking_views,
+    monitoring_views,
 )
 
 urlpatterns = [
@@ -100,4 +101,6 @@ urlpatterns = [
     path('vehicle-ticket-bookings/<int:pk>/edit/', vehicle_ticket_booking_views.vehicle_ticket_booking_detail_post_view, name='vehicle-ticket-booking-detail-post'),
     path('vehicle-ticket-bookings/<int:pk>/delete/', vehicle_ticket_booking_views.vehicle_ticket_booking_delete_get_view, name='vehicle-ticket-booking-delete'),
     path('vehicle-ticket-bookings/<int:pk>/ticket-pdf/', vehicle_ticket_booking_views.vehicle_ticket_booking_ticket_pdf_view, name='vehicle-ticket-booking-ticket-pdf'),
+    # Monitoring (control room snapshot)
+    path('monitoring/', monitoring_views.monitoring_snapshot_view, name='monitoring-snapshot'),
 ]
