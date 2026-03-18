@@ -18,6 +18,7 @@ from ..models import (
     VehicleSchedule,
     VehicleTicketBooking,
 )
+from ..utils import date_range_to_datetime_range
 
 
 def _parse_date(val, default=None):
@@ -77,29 +78,29 @@ def vehicle_analytics_view(request, vehicle_id):
         request.query_params.get('date_from'),
         request.query_params.get('date_to'),
     )
+    start_dt, end_dt = date_range_to_datetime_range(date_from, date_to)
 
     # Seat bookings for this vehicle in range (by check_in_datetime)
-    seat_bookings_qs = SeatBooking.objects.filter(
-        vehicle_id=vehicle_id,
-        check_in_datetime__date__gte=date_from,
-        check_in_datetime__date__lte=date_to,
-    )
+    seat_bookings_qs = SeatBooking.objects.filter(vehicle_id=vehicle_id)
+    if start_dt is not None:
+        seat_bookings_qs = seat_bookings_qs.filter(check_in_datetime__gte=start_dt)
+    if end_dt is not None:
+        seat_bookings_qs = seat_bookings_qs.filter(check_in_datetime__lte=end_dt)
 
     # Trips for this vehicle in range (by start_time)
-    trips_qs = Trip.objects.filter(
-        vehicle_id=vehicle_id,
-        start_time__isnull=False,
-        start_time__date__gte=date_from,
-        start_time__date__lte=date_to,
-    )
+    trips_qs = Trip.objects.filter(vehicle_id=vehicle_id, start_time__isnull=False)
+    if start_dt is not None:
+        trips_qs = trips_qs.filter(start_time__gte=start_dt)
+    if end_dt is not None:
+        trips_qs = trips_qs.filter(start_time__lte=end_dt)
 
     # Vehicle ticket bookings: schedules belonging to this vehicle, created_at in range
     schedule_ids = VehicleSchedule.objects.filter(vehicle_id=vehicle_id).values_list('id', flat=True)
-    ticket_bookings_qs = VehicleTicketBooking.objects.filter(
-        vehicle_schedule_id__in=schedule_ids,
-        created_at__date__gte=date_from,
-        created_at__date__lte=date_to,
-    )
+    ticket_bookings_qs = VehicleTicketBooking.objects.filter(vehicle_schedule_id__in=schedule_ids)
+    if start_dt is not None:
+        ticket_bookings_qs = ticket_bookings_qs.filter(created_at__gte=start_dt)
+    if end_dt is not None:
+        ticket_bookings_qs = ticket_bookings_qs.filter(created_at__lte=end_dt)
 
     # Summary
     seat_revenue_agg = seat_bookings_qs.aggregate(s=Sum('trip_amount'))

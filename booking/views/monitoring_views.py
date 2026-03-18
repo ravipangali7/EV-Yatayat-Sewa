@@ -17,6 +17,7 @@ from ..models import (
     VehicleSchedule,
     VehicleTicketBooking,
 )
+from ..utils import date_range_to_datetime_range
 from core.models import Wallet
 
 
@@ -42,6 +43,7 @@ def monitoring_snapshot_view(request):
     now = timezone.now()
     today = now.date()
     month_start, month_end = _get_month_bounds(now)
+    today_start_dt, today_end_dt = date_range_to_datetime_range(today, today)
 
     # --- Vehicles: active only, with related data ---
     vehicles_qs = (
@@ -104,12 +106,13 @@ def monitoring_snapshot_view(request):
         for row in SeatBooking.objects.filter(trip_id__in=active_trip_ids).values('trip_id').annotate(c=Count('id')):
             seats_booked_by_trip[row['trip_id']] = row['c']
 
-    # Today trip count per vehicle
+    # Today trip count per vehicle (full-day range in project timezone)
     today_trips_by_vehicle = dict(
         Trip.objects.filter(
             vehicle_id__in=vehicle_ids,
-            start_time__date=today,
             start_time__isnull=False,
+            start_time__gte=today_start_dt,
+            start_time__lte=today_end_dt,
         )
         .values('vehicle_id')
         .annotate(c=Count('id'))
@@ -120,7 +123,8 @@ def monitoring_snapshot_view(request):
     today_seat_revenue = dict(
         SeatBooking.objects.filter(
             vehicle_id__in=vehicle_ids,
-            check_in_datetime__date=today,
+            check_in_datetime__gte=today_start_dt,
+            check_in_datetime__lte=today_end_dt,
         )
         .values('vehicle_id')
         .annotate(s=Sum('trip_amount'))
@@ -134,7 +138,8 @@ def monitoring_snapshot_view(request):
         for row in (
             VehicleTicketBooking.objects.filter(
                 vehicle_schedule_id__in=schedule_ids,
-                created_at__date=today,
+                created_at__gte=today_start_dt,
+                created_at__lte=today_end_dt,
             )
             .values('vehicle_schedule__vehicle_id')
             .annotate(s=Sum('price'))
@@ -220,13 +225,14 @@ def _build_heavy_dues(month_start, month_end):
     if not wallets:
         return []
 
+    start_dt, end_dt = date_range_to_datetime_range(month_start, month_end)
     user_ids = [w.user_id for w in wallets]
     trips_count = dict(
         Trip.objects.filter(
             driver_id__in=user_ids,
-            start_time__date__gte=month_start,
-            start_time__date__lte=month_end,
             start_time__isnull=False,
+            start_time__gte=start_dt,
+            start_time__lte=end_dt,
         )
         .values('driver_id')
         .annotate(c=Count('id'))

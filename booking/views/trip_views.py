@@ -14,6 +14,7 @@ from rest_framework import status
 from ..models import Trip, Vehicle, Route, Location, VehicleSchedule, VehicleTicketBooking, SeatBooking, VehicleSeat
 from ..route_order import get_route_place_order, get_route_ordered_points
 from ..services.notify_node import notify_node_seat_booked
+from ..utils import date_range_to_datetime_range
 from core.models import User, SuperSetting
 
 
@@ -368,10 +369,13 @@ def trip_list_get_view(request):
         queryset = queryset.filter(end_time__isnull=True)
     if search:
         queryset = queryset.filter(trip_id__icontains=search)
-    if date_from:
-        queryset = queryset.filter(start_time__date__gte=date_from)
-    if date_to:
-        queryset = queryset.filter(start_time__date__lte=date_to)
+    start_dt, end_dt = date_range_to_datetime_range(date_from, date_to)
+    if start_dt is not None or end_dt is not None:
+        queryset = queryset.filter(start_time__isnull=False)
+        if start_dt is not None:
+            queryset = queryset.filter(start_time__gte=start_dt)
+        if end_dt is not None:
+            queryset = queryset.filter(start_time__lte=end_dt)
 
     total = queryset.count()
     page = int(request.query_params.get('page', 1))

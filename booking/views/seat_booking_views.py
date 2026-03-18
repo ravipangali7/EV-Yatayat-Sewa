@@ -12,6 +12,7 @@ from django.db.models import F
 from ..models import Vehicle, VehicleSeat, SeatBooking, Trip, Place, Location
 from ..route_order import get_route_ordered_points, get_route_place_order
 from ..services.notify_node import notify_node_seat_booked
+from ..utils import date_range_to_datetime_range
 from core.models import User, SuperSetting, Wallet, Transaction
 from core.services.wallet_transaction import create_wallet_transaction
 from ..serializers import SeatBookingSerializer
@@ -126,10 +127,11 @@ def seat_booking_list_get_view(request):
     if vehicle_seat_id:
         queryset = queryset.filter(vehicle_seat_id=vehicle_seat_id)
     
-    if date_from:
-        queryset = queryset.filter(check_in_datetime__date__gte=date_from)
-    if date_to:
-        queryset = queryset.filter(check_in_datetime__date__lte=date_to)
+    start_dt, end_dt = date_range_to_datetime_range(date_from, date_to)
+    if start_dt is not None:
+        queryset = queryset.filter(check_in_datetime__gte=start_dt)
+    if end_dt is not None:
+        queryset = queryset.filter(check_in_datetime__lte=end_dt)
     
     total = queryset.count()
     sum_revenue = queryset.aggregate(s=Sum('trip_amount'))['s'] or 0

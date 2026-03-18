@@ -12,6 +12,7 @@ from django.db import transaction as db_transaction
 
 from ..models import VehicleTicketBooking, VehicleSchedule, VehicleSeat, Place
 from ..route_order import get_route_place_order
+from ..utils import date_range_to_datetime_range
 from core.models import User, Wallet
 from core.services.wallet_transaction import create_wallet_transaction
 
@@ -110,10 +111,11 @@ def vehicle_ticket_booking_list_get_view(request):
             Q(pnr__icontains=search) |
             Q(ticket_id__icontains=search)
         )
-    if date_from:
-        queryset = queryset.filter(created_at__date__gte=date_from)
-    if date_to:
-        queryset = queryset.filter(created_at__date__lte=date_to)
+    start_dt, end_dt = date_range_to_datetime_range(date_from, date_to)
+    if start_dt is not None:
+        queryset = queryset.filter(created_at__gte=start_dt)
+    if end_dt is not None:
+        queryset = queryset.filter(created_at__lte=end_dt)
     total = queryset.count()
     sum_price = queryset.aggregate(s=Sum('price'))['s'] or 0
     page = int(request.query_params.get('page', 1))
