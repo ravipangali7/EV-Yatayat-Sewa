@@ -10,6 +10,7 @@ import math
 import json
 from django.db.models import F
 from ..models import Vehicle, VehicleSeat, SeatBooking, Trip, Place, Location
+from ..route_order import get_route_ordered_points, get_route_place_order
 from ..services.notify_node import notify_node_seat_booked
 from core.models import User, SuperSetting, Wallet, Transaction
 from core.services.wallet_transaction import create_wallet_transaction
@@ -626,6 +627,44 @@ def _vehicle_direct_book_eligible(vehicle, user_lat, user_lng):
     return True, None
 
 
+def _vehicle_current_stop_order(vehicle):
+    """Return (current_order_index, place_id_to_order_map) for vehicle's position on route, or (None, {}) if unknown.
+    current_order_index is the route order (0-based) of the point nearest to the vehicle's last location."""
+    if not getattr(vehicle, 'active_route', None):
+        return None, {}
+    active_trip = Trip.objects.filter(vehicle=vehicle, end_time__isnull=True).order_by('-start_time').first()
+    reverse = getattr(active_trip, 'reverse_direction', False) if active_trip else False
+    last_loc = Location.objects.filter(vehicle=vehicle).order_by('-created_at').first()
+    if not last_loc:
+        return None, {}
+    points = get_route_ordered_points(vehicle.active_route, reverse=reverse)
+    if not points:
+        return None, {}
+    current_order = 0
+    min_dist = float('inf')
+    for order_idx, (kind, place, rsp) in enumerate(points):
+        dist = float(haversine_distance(last_loc.latitude, last_loc.longitude, place.latitude, place.longitude))
+        if dist < min_dist:
+            min_dist = dist
+            current_order = order_idx
+    order_map = get_route_place_order(vehicle.active_route, reverse=reverse)
+    return current_order, order_map
+
+
+def _origin_at_least_n_stops_ahead(vehicle, origin_place_id, n=2):
+    """Return (True, None) if origin_place is at least n stops ahead of bus current position, else (False, error_message)."""
+    current_order, order_map = _vehicle_current_stop_order(vehicle)
+    if current_order is None:
+        return True, None
+    origin_place_id_key = int(origin_place_id) if isinstance(origin_place_id, str) and origin_place_id.isdigit() else origin_place_id
+    origin_order = order_map.get(origin_place_id_key)
+    if origin_order is None:
+        return False, "Pick-up stop is not on the vehicle's route."
+    if origin_order < current_order + n:
+        return False, "Pick-up must be at least 2 stops ahead of the bus. Please choose a later stop."
+    return True, None
+
+
 @api_view(['GET'])
 def direct_seat_booking_preview_view(request):
     """Preview estimated trip_amount for direct seat booking (short trip).
@@ -662,9 +701,14 @@ def direct_seat_booking_preview_view(request):
         )
 
     try:
-        Vehicle.objects.select_related('active_route').get(pk=vehicle_id)
+        vehicle = Vehicle.objects.select_related('active_route').get(pk=vehicle_id)
     except Vehicle.DoesNotExist:
         return Response({'error': 'Vehicle not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if origin_place_id:
+        ok, err = _origin_at_least_n_stops_ahead(vehicle, origin_place_id, n=2)
+        if not ok:
+            return Response({'error': err}, status=status.HTTP_400_BAD_REQUEST)
     try:
         super_setting = SuperSetting.objects.latest('created_at')
         per_km = super_setting.per_km_charge
@@ -717,6 +761,7 @@ def direct_seat_booking_create_view(request):
     check_in_address = request.POST.get('check_in_address') or request.data.get('check_in_address', '')
     trip_amount_val = request.POST.get('trip_amount') or request.data.get('trip_amount')
     destination_place_id = request.POST.get('destination_place') or request.data.get('destination_place') or None
+    origin_place_id = request.POST.get('origin_place') or request.data.get('origin_place') or None
 
     if not vehicle_id:
         return Response({'error': 'vehicle is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -750,6 +795,11 @@ def direct_seat_booking_create_view(request):
     if not ok:
         return Response({'error': err}, status=status.HTTP_400_BAD_REQUEST)
 
+    if origin_place_id:
+        ok, err = _origin_at_least_n_stops_ahead(vehicle, origin_place_id, n=2)
+        if not ok:
+            return Response({'error': err}, status=status.HTTP_400_BAD_REQUEST)
+
     try:
         check_in_dt = datetime.fromisoformat(str(check_in_datetime).replace('Z', '+00:00'))
     except Exception:
@@ -774,6 +824,13 @@ def direct_seat_booking_create_view(request):
             destination_place = Place.objects.get(pk=destination_place_id)
         except Place.DoesNotExist:
             return Response({'error': 'Destination place not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    origin_place = None
+    if origin_place_id:
+        try:
+            origin_place = Place.objects.get(pk=origin_place_id)
+        except Place.DoesNotExist:
+            return Response({'error': 'Origin place not found'}, status=status.HTTP_404_NOT_FOUND)
 
     active_trip = Trip.objects.filter(vehicle=vehicle, end_time__isnull=True).order_by('-start_time').first()
     n = len(vehicle_seats)
@@ -817,6 +874,7 @@ def direct_seat_booking_create_view(request):
                 check_in_datetime=check_in_dt,
                 check_in_address=check_in_address or '',
                 destination_place=destination_place,
+                origin_place=origin_place,
                 trip_amount=amount_per_booking,
                 is_paid=True,
             )

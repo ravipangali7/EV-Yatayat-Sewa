@@ -605,6 +605,17 @@ def trip_current_stop_view(request):
                         'phone': vtb.phone,
                         'seat': seat_str,
                     })
+            for sb in SeatBooking.objects.filter(
+                trip=trip,
+                origin_place_id=place.id,
+                check_out_datetime__isnull=True,
+            ).select_related('user', 'vehicle_seat'):
+                pickups.append({
+                    'pnr': '',
+                    'name': sb.user.name if sb.user else 'Guest',
+                    'phone': getattr(sb.user, 'phone', None) or '',
+                    'seat': f"{sb.vehicle_seat.side}{sb.vehicle_seat.number}",
+                })
             dropoffs = []
             # All seat bookings (scheduled or not) whose destination is this stop and not yet checked out
             for sb in SeatBooking.objects.filter(

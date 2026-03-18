@@ -281,6 +281,7 @@ class SeatBooking(models.Model):
     trip_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     is_paid = models.BooleanField(default=False)
     destination_place = models.ForeignKey(Place, on_delete=models.SET_NULL, null=True, blank=True, related_name='seat_bookings_destination')
+    origin_place = models.ForeignKey(Place, on_delete=models.SET_NULL, null=True, blank=True, related_name='seat_bookings_origin')
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
     updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
     
