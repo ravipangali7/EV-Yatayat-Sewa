@@ -34,10 +34,24 @@ class UserAdmin(BaseUserAdmin):
 @admin.register(SuperSetting)
 class SuperSettingAdmin(admin.ModelAdmin):
     """SuperSetting admin"""
-    list_display = ('id', 'per_km_charge', 'initial_km', 'initial_km_charge', 'gps_threshold_second', 'point_cover_radius', 'minute_coverage_schedule', 'short_trip_min_distance_for_booking', 'short_trip_max_distance_for_booking', 'created_at', 'updated_at')
-    list_editable = ('per_km_charge', 'initial_km', 'initial_km_charge', 'gps_threshold_second', 'point_cover_radius', 'minute_coverage_schedule', 'short_trip_min_distance_for_booking', 'short_trip_max_distance_for_booking')
+    list_display = (
+        'id', 'per_km_charge', 'initial_km', 'initial_km_charge', 'gps_threshold_second', 'point_cover_radius',
+        'minute_coverage_schedule', 'short_trip_min_distance_for_booking', 'short_trip_max_distance_for_booking',
+        'luna_web_origin', 'created_at', 'updated_at',
+    )
+    list_editable = (
+        'per_km_charge', 'initial_km', 'initial_km_charge', 'gps_threshold_second', 'point_cover_radius',
+        'minute_coverage_schedule', 'short_trip_min_distance_for_booking', 'short_trip_max_distance_for_booking',
+        'luna_web_origin',
+    )
     readonly_fields = ('created_at', 'updated_at')
     list_filter = ('created_at', 'updated_at')
+    fieldsets = (
+        (None, {'fields': ('per_km_charge', 'initial_km', 'initial_km_charge', 'gps_threshold_second', 'point_cover_radius', 'minute_coverage_schedule')}),
+        ('Seat & trips', {'fields': ('seat_layout', 'stop_point_announcement_header', 'short_trip_min_distance_for_booking', 'short_trip_max_distance_for_booking')}),
+        ('Luna camera embed', {'fields': ('luna_web_origin', 'luna_api_token')}),
+        ('Meta', {'fields': ('created_at', 'updated_at')}),
+    )
 
 
 @admin.register(Wallet)

@@ -71,11 +71,18 @@ class SuperSetting(models.Model):
     short_trip_max_distance_for_booking = models.DecimalField(max_digits=10, decimal_places=2, default=200, null=True, blank=True)  # km
     initial_km = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)  # km; flat charge applies up to this distance
     initial_km_charge = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)  # Rs; flat charge for first initial_km
+    luna_web_origin = models.CharField(max_length=512, blank=True, default='')  # Luna web base, no trailing slash (e.g. https://dashboard.example.com)
+    luna_api_token = models.CharField(max_length=1024, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True, db_column='created_at')
     updated_at = models.DateTimeField(auto_now=True, db_column='updated_at')
     
     class Meta:
         db_table = 'super_settings'
+    
+    def save(self, *args, **kwargs):
+        if self.luna_web_origin:
+            self.luna_web_origin = self.luna_web_origin.rstrip('/')
+        super().save(*args, **kwargs)
     
     def __str__(self):
         return f"Super Setting (Per KM: {self.per_km_charge})"

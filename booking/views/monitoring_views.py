@@ -182,6 +182,7 @@ def monitoring_snapshot_view(request):
 
         vehicles_payload.append({
             'id': str(v.id),
+            'imei': (v.imei or '').strip() or None,
             'name': v.name,
             'vehicle_no': v.vehicle_no,
             'start_point': start_point,
