@@ -15,9 +15,26 @@ class SliderAdmin(admin.ModelAdmin):
 @admin.register(CMSPage)
 class CMSPageAdmin(admin.ModelAdmin):
     list_display = ('id', 'title', 'slug', 'is_active', 'is_footer', 'is_header', 'is_about', 'section_in', 'created_at')
-    list_filter = ('is_active', 'is_footer', 'is_header', 'is_about')
+    list_filter = ('is_active', 'is_footer', 'is_header', 'is_about', 'robots_noindex')
     search_fields = ('title', 'slug')
     prepopulated_fields = {'slug': ('title',)}
+    fieldsets = (
+        (None, {'fields': ('title', 'slug', 'image', 'content', 'is_active', 'section_in')}),
+        ('Placement', {'fields': ('is_footer', 'is_header', 'is_about')}),
+        (
+            'SEO',
+            {
+                'fields': (
+                    'meta_title',
+                    'meta_description',
+                    'og_image',
+                    'og_image_alt',
+                    'canonical_path',
+                    'robots_noindex',
+                )
+            },
+        ),
+    )
 
 
 @admin.register(Team)
@@ -38,10 +55,26 @@ class TestimonialAdmin(admin.ModelAdmin):
 @admin.register(Service)
 class ServiceAdmin(admin.ModelAdmin):
     list_display = ('id', 'name', 'slug', 'order', 'is_active', 'created_at')
-    list_filter = ('is_active',)
+    list_filter = ('is_active', 'robots_noindex')
     search_fields = ('name', 'slug')
     list_editable = ('order',)
     prepopulated_fields = {'slug': ('name',)}
+    fieldsets = (
+        (None, {'fields': ('name', 'slug', 'svg', 'icon', 'description', 'order', 'is_active')}),
+        (
+            'SEO',
+            {
+                'fields': (
+                    'meta_title',
+                    'meta_description',
+                    'og_image',
+                    'og_image_alt',
+                    'canonical_path',
+                    'robots_noindex',
+                )
+            },
+        ),
+    )
 
 
 @admin.register(FAQ)
@@ -63,9 +96,25 @@ class ContactMessageAdmin(admin.ModelAdmin):
 @admin.register(Blog)
 class BlogAdmin(admin.ModelAdmin):
     list_display = ('id', 'name', 'slug', 'is_active', 'created_at')
-    list_filter = ('is_active',)
+    list_filter = ('is_active', 'robots_noindex')
     search_fields = ('name', 'slug')
     prepopulated_fields = {'slug': ('name',)}
+    fieldsets = (
+        (None, {'fields': ('name', 'slug', 'image', 'excerpt', 'category', 'content', 'is_active')}),
+        (
+            'SEO',
+            {
+                'fields': (
+                    'meta_title',
+                    'meta_description',
+                    'og_image',
+                    'og_image_alt',
+                    'canonical_path',
+                    'robots_noindex',
+                )
+            },
+        ),
+    )
 
 
 @admin.register(SiteSetting)
@@ -73,7 +122,20 @@ class SiteSettingAdmin(admin.ModelAdmin):
     list_display = ('id', 'name', 'tagline', 'created_at')
     search_fields = ('name', 'tagline')
     fieldsets = (
-        (None, {'fields': ('name', 'tagline', 'logo', 'cover_image')}),
+        (None, {'fields': ('name', 'tagline', 'logo', 'favicon', 'cover_image', 'default_og_image')}),
+        (
+            'SEO & social',
+            {
+                'fields': (
+                    'meta_title',
+                    'meta_description',
+                    'twitter_handle',
+                    'facebook_app_id',
+                    'og_locale',
+                    'google_site_verification',
+                )
+            },
+        ),
         ('Contact', {'fields': ('address', 'phones', 'emails', 'map')}),
         ('Footer', {'fields': ('footer_text',)}),
         ('Stats', {'fields': ('stats',)}),

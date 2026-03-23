@@ -207,6 +207,24 @@ if not os.path.isabs(NCHL_PFX_PATH):
 
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'evyatayatsewa.com').rstrip('/')
 
+# Public site URL for Open Graph, canonical links, and sitemap (include https://, no trailing slash).
+# Example: https://www.evyatayatsewa.com
+# Empty = derive from the incoming request (fine for local dev). In production set e.g. https://www.evyatayatsewa.com
+# so Open Graph URLs, sitemap locs, and canonical tags point at the public site (HTTPS). Required for correct
+# Facebook / Messenger / WhatsApp previews when crawlers do not use your dev host.
+SITE_CANONICAL_ORIGIN = os.environ.get('SITE_CANONICAL_ORIGIN', '').strip().rstrip('/')
+
+# Built Vite index.html path (after `npm run build` in web/). Used to inject hashed JS/CSS into the SEO shell.
+# Serve the web/dist assets from the same host as this app (or proxy /assets/ to static) so the shell loads the SPA.
+SPA_INDEX_HTML_PATH = os.environ.get(
+    'SPA_INDEX_HTML_PATH',
+    str(BASE_DIR.parent / 'web' / 'dist' / 'index.html'),
+)
+
+# Set false on API-only hosts (e.g. system.example.com) if you do not want Django to serve the marketing HTML shell at /.
+ENABLE_PUBLIC_SPA_SHELL = os.environ.get('ENABLE_PUBLIC_SPA_SHELL', 'true').lower() in ('1', 'true', 'yes')
+# After production deploy: use https://developers.facebook.com/tools/debug/ to refresh og:image cache for shared links.
+
 # Node real-time server (seat-booked webhook, trip socket)
 NODE_BASE_URL = os.environ.get('NODE_BASE_URL', 'https://node.evyatayatsewa.com').rstrip('/')
 

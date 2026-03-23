@@ -20,6 +20,8 @@ class CMSPageSerializer(serializers.ModelSerializer):
         model = CMSPage
         fields = [
             'id', 'title', 'slug', 'image', 'content',
+            'meta_title', 'meta_description', 'og_image', 'og_image_alt',
+            'canonical_path', 'robots_noindex',
             'is_active', 'is_footer', 'is_header', 'is_about', 'section_in',
             'created_at', 'updated_at',
         ]
@@ -32,6 +34,8 @@ class CMSPageChildSerializer(serializers.ModelSerializer):
         model = CMSPage
         fields = [
             'id', 'title', 'slug', 'image', 'content',
+            'meta_title', 'meta_description', 'og_image', 'og_image_alt',
+            'canonical_path', 'robots_noindex',
             'is_active', 'is_footer', 'is_header', 'is_about', 'section_in',
             'created_at', 'updated_at',
         ]
@@ -48,6 +52,8 @@ class CMSPagePublicSerializer(serializers.ModelSerializer):
         model = CMSPage
         fields = [
             'id', 'title', 'slug', 'image', 'content',
+            'meta_title', 'meta_description', 'og_image', 'og_image_alt',
+            'canonical_path', 'robots_noindex',
             'is_active', 'is_footer', 'is_header', 'is_about', 'section_in',
             'child_sections', 'created_at', 'updated_at',
         ]
@@ -84,6 +90,8 @@ class ServiceSerializer(serializers.ModelSerializer):
         model = Service
         fields = [
             'id', 'name', 'slug', 'svg', 'description', 'icon', 'order', 'is_active',
+            'meta_title', 'meta_description', 'og_image', 'og_image_alt',
+            'canonical_path', 'robots_noindex',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
@@ -120,6 +128,8 @@ class BlogSerializer(serializers.ModelSerializer):
         model = Blog
         fields = [
             'id', 'name', 'slug', 'image', 'content', 'excerpt', 'category', 'is_active',
+            'meta_title', 'meta_description', 'og_image', 'og_image_alt',
+            'canonical_path', 'robots_noindex',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
@@ -129,7 +139,9 @@ class SiteSettingSerializer(serializers.ModelSerializer):
     class Meta:
         model = SiteSetting
         fields = [
-            'id', 'logo', 'name', 'tagline', 'phones', 'emails', 'address', 'map',
+            'id', 'logo', 'favicon', 'default_og_image', 'meta_title', 'meta_description',
+            'twitter_handle', 'facebook_app_id', 'og_locale', 'google_site_verification',
+            'name', 'tagline', 'phones', 'emails', 'address', 'map',
             'cover_image', 'footer_text', 'stats',
             'about_image', 'about_title', 'about_content', 'mission', 'vision', 'values',
             'created_at', 'updated_at',

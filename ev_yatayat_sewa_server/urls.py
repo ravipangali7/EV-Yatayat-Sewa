@@ -19,10 +19,13 @@ from django.urls import path, include, re_path
 from django.conf import settings
 from django.conf.urls.static import static
 from core.views.media_views import serve_media
+from website.views.sitemap_robots import robots_txt_view, sitemap_view
 
 urlpatterns = [
     # Media files - must be before admin URLs to bypass authentication
     re_path(r'^media/(?P<path>.*)$', serve_media, name='media'),
+    path('sitemap.xml', sitemap_view),
+    path('robots.txt', robots_txt_view),
     # Booking first so /api/trips/current-stop/ etc. are matched; then core (auth, users, wallets); then walkietalkie
     path('api/', include('booking.urls')),
     path('api/', include('core.urls')),
@@ -33,6 +36,10 @@ urlpatterns = [
 urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
 urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
-urlpatterns += [
+_spa_shell = []
+if getattr(settings, 'ENABLE_PUBLIC_SPA_SHELL', True):
+    _spa_shell.append(path('', include('website.frontend_urls')))
+
+urlpatterns += _spa_shell + [
     path('', admin.site.urls),
 ]
