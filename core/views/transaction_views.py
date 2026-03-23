@@ -60,6 +60,17 @@ def _parse_date(val):
         return None
 
 
+def _parse_bool(val):
+    if val is None or val == '':
+        return None
+    txt = str(val).strip().lower()
+    if txt in ('1', 'true', 'yes'):
+        return True
+    if txt in ('0', 'false', 'no'):
+        return False
+    return None
+
+
 @api_view(['GET'])
 def transaction_list_get_view(request):
     """List all transactions. Supports date_from, date_to (on created_at), search, filters. Returns stats for same filters."""
@@ -73,6 +84,8 @@ def transaction_list_get_view(request):
     card_id = request.query_params.get('card', None)
     date_from = _parse_date(request.query_params.get('date_from'))
     date_to = _parse_date(request.query_params.get('date_to'))
+    is_driver = _parse_bool(request.query_params.get('is_driver'))
+    is_ticket_dealer = _parse_bool(request.query_params.get('is_ticket_dealer'))
     
     # Build queryset
     queryset = Transaction.objects.select_related('wallet', 'user', 'card').all()
@@ -98,6 +111,12 @@ def transaction_list_get_view(request):
     
     if card_id:
         queryset = queryset.filter(card_id=card_id)
+
+    if is_driver is not None:
+        queryset = queryset.filter(user__is_driver=is_driver)
+
+    if is_ticket_dealer is not None:
+        queryset = queryset.filter(user__is_ticket_dealer=is_ticket_dealer)
     
     if date_from:
         queryset = queryset.filter(created_at__date__gte=date_from)
