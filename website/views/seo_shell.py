@@ -19,6 +19,13 @@ def _site():
     return SiteSetting.objects.first()
 
 
+def _public_site_logo_og(origin: str) -> str | None:
+    """Fallback when no CMS image; requires web/public/logo.png deployed at /logo.png."""
+    if not origin:
+        return None
+    return f'{origin.rstrip("/")}/logo.png'
+
+
 def _full_public_url(origin: str, path: str) -> str:
     path = (path or '/').strip()
     if not path.startswith('/'):
@@ -53,6 +60,8 @@ def _base_context(request, site):
     favicon = None
     if site:
         favicon = absolute_media_url(request, site.favicon) or absolute_media_url(request, site.logo)
+    if not favicon and origin:
+        favicon = _public_site_logo_og(origin)
     tw = (site.twitter_handle if site else '') or ''
     tw = tw.strip().lstrip('@')
     twitter_site = f'@{tw}' if tw else ''
@@ -93,7 +102,7 @@ def _seo_static_page(request, *, page_key: str, path: str, title_suffix: str, de
             'meta_description': desc,
             'og_title': title[:70],
             'og_description': desc,
-            'og_image': og_image,
+            'og_image': og_image or _public_site_logo_og(origin),
             'og_image_alt': site_name,
             'og_type': 'website',
             'og_url': _full_public_url(origin, path),
@@ -147,6 +156,7 @@ def _seo_blog(request, slug: str):
         absolute_media_url(request, blog.og_image)
         or absolute_media_url(request, blog.image)
         or _site_default_og_image(request, site)
+        or _public_site_logo_og(origin)
     )
 
     path = (blog.canonical_path or '').strip() or f'/blog/{blog.slug}/'
@@ -191,7 +201,11 @@ def _seo_service(request, slug: str):
 
     title = (svc.meta_title or svc.name or '').strip()[:70]
     desc = ((svc.meta_description or '').strip() or strip_html_to_text(svc.description, 300))[:300]
-    og_image = absolute_media_url(request, svc.og_image) or _site_default_og_image(request, site)
+    og_image = (
+        absolute_media_url(request, svc.og_image)
+        or _site_default_og_image(request, site)
+        or _public_site_logo_og(origin)
+    )
 
     path = (svc.canonical_path or '').strip() or f'/service/{svc.slug}/'
     if not path.startswith('/'):
@@ -232,6 +246,7 @@ def _seo_cms_page(request, slug: str):
         absolute_media_url(request, page.og_image)
         or absolute_media_url(request, page.image)
         or _site_default_og_image(request, site)
+        or _public_site_logo_og(origin)
     )
 
     path = (page.canonical_path or '').strip() or f'/page/{page.slug}/'
@@ -268,7 +283,7 @@ def _render(request, builder, status=200):
                 'meta_description': 'The page you requested was not found.',
                 'og_title': 'Not found',
                 'og_description': 'The page you requested was not found.',
-                'og_image': _site_default_og_image(request, site),
+                'og_image': _site_default_og_image(request, site) or _public_site_logo_og(origin),
                 'og_image_alt': base['site_name'],
                 'og_type': 'website',
                 'og_url': _full_public_url(origin, request.path),

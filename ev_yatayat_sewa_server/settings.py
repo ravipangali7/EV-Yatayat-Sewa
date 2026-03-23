@@ -214,6 +214,11 @@ FRONTEND_URL = os.environ.get('FRONTEND_URL', 'evyatayatsewa.com').rstrip('/')
 # Facebook / Messenger / WhatsApp previews when crawlers do not use your dev host.
 SITE_CANONICAL_ORIGIN = os.environ.get('SITE_CANONICAL_ORIGIN', '').strip().rstrip('/')
 
+# If Django media files are only reachable on the API host (e.g. https://system.evyatayatsewa.com), set this so
+# og:image URLs point at that host while og:url still uses SITE_CANONICAL_ORIGIN. Leave empty if /media/ is
+# proxied on the same host as the marketing site.
+MEDIA_PUBLIC_BASE_URL = os.environ.get('MEDIA_PUBLIC_BASE_URL', '').strip().rstrip('/')
+
 # Built Vite index.html path (after `npm run build` in web/). Used to inject hashed JS/CSS into the SEO shell.
 # Serve the web/dist assets from the same host as this app (or proxy /assets/ to static) so the shell loads the SPA.
 SPA_INDEX_HTML_PATH = os.environ.get(

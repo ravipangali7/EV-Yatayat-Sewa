@@ -25,6 +25,12 @@ def get_canonical_origin(request=None):
 
 
 def absolute_media_url(request, file_field):
+    """
+    Build an absolute HTTPS URL for uploaded media (og:image, etc.).
+    Prefer MEDIA_PUBLIC_BASE_URL (e.g. API host that serves /media/) when set,
+    else SITE_CANONICAL_ORIGIN so links match the public marketing domain,
+    else the incoming request host.
+    """
     if not file_field:
         return None
     try:
@@ -33,13 +39,28 @@ def absolute_media_url(request, file_field):
         return None
     if url.startswith('http'):
         return url
+    path = url if url.startswith('/') else f'/{url}'
+
+    media_base = getattr(settings, 'MEDIA_PUBLIC_BASE_URL', '') or ''
+    media_base = media_base.strip().rstrip('/')
+    if media_base and not media_base.startswith('http'):
+        media_base = f'https://{media_base}'
+    if media_base:
+        return f'{media_base}{path}'
+
+    canonical = getattr(settings, 'SITE_CANONICAL_ORIGIN', '') or ''
+    canonical = canonical.strip().rstrip('/')
+    if canonical and not canonical.startswith('http'):
+        canonical = f'https://{canonical}'
+    if canonical:
+        return f'{canonical}{path}'
+
     if request:
         return request.build_absolute_uri(url)
     origin = get_canonical_origin()
     if not origin:
-        return url
-    path = url if url.startswith('/') else f'/{url}'
-    return f'{origin}{path}'
+        return path
+    return f'{origin.rstrip("/")}{path}'
 
 
 def strip_html_to_text(html, max_length=300):

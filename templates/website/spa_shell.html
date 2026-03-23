@@ -20,7 +20,10 @@
   <meta property="og:type" content="{{ og_type }}" />
   <meta property="og:url" content="{{ og_url }}" />
   {% if og_locale %}<meta property="og:locale" content="{{ og_locale }}" />{% endif %}
-  {% if og_image %}<meta property="og:image" content="{{ og_image }}" />{% endif %}
+  {% if og_image %}
+  <meta property="og:image" content="{{ og_image }}" />
+  <meta property="og:image:secure_url" content="{{ og_image }}" />
+  {% endif %}
   {% if og_image_alt and og_image %}<meta property="og:image:alt" content="{{ og_image_alt }}" />{% endif %}
   {% if facebook_app_id %}<meta property="fb:app_id" content="{{ facebook_app_id }}" />{% endif %}
   {% if article_published_time %}
