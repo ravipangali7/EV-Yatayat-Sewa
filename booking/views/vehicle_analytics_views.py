@@ -174,19 +174,25 @@ def vehicle_analytics_view(request, vehicle_id):
     )
     revenue_by_day = defaultdict(lambda: Decimal('0'))
     for item in daily_seat:
+        if item['day'] is None:
+            continue
         revenue_by_day[item['day'].isoformat()] += item['amount'] or Decimal('0')
     for item in daily_ticket:
+        if item['day'] is None:
+            continue
         revenue_by_day[item['day'].isoformat()] += item['amount'] or Decimal('0')
     daily_revenue_list = [{'date': d, 'amount': str(a)} for d, a in sorted(revenue_by_day.items())]
 
     daily_trips_list = [
         {'date': item['day'].isoformat(), 'count': item['count']}
         for item in trips_qs.annotate(day=TruncDate('start_time')).values('day').annotate(count=Count('id')).order_by('day')
+        if item['day'] is not None
     ]
 
     daily_seat_bookings_list = [
         {'date': item['day'].isoformat(), 'count': item['count']}
         for item in seat_bookings_qs.annotate(day=TruncDate('check_in_datetime')).values('day').annotate(count=Count('id')).order_by('day')
+        if item['day'] is not None
     ]
 
     # By driver: for each driver who drove this vehicle in range
