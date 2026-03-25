@@ -12,6 +12,7 @@ from django.db.models import F
 from ..models import Vehicle, VehicleSeat, SeatBooking, Trip, Place, Location
 from ..route_order import get_route_ordered_points, get_route_place_order
 from ..services.notify_node import notify_node_seat_booked
+from ..services.reverse_geocode import resolve_address_from_coords
 from ..utils import date_range_to_datetime_range
 from core.models import User, SuperSetting, Wallet, Transaction
 from core.services.wallet_transaction import create_wallet_transaction
@@ -259,6 +260,10 @@ def _create_seat_booking(request):
             destination_place = Place.objects.get(pk=destination_place_id)
         except Place.DoesNotExist:
             return Response({'error': 'Destination place not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    check_in_address = resolve_address_from_coords(check_in_address, check_in_lat, check_in_lng)
+    if check_out_lat and check_out_lng:
+        check_out_address = resolve_address_from_coords(check_out_address, check_out_lat, check_out_lng)
 
     booking_kwargs = {
         'user': user,
@@ -563,6 +568,8 @@ def seat_booking_checkout_view(request):
             return Response({'error': 'Super setting not found. Please configure per_km_charge.'}, status=status.HTTP_400_BAD_REQUEST)
         trip_amount = _trip_amount_from_distance(distance, per_km_charge, initial_km, initial_km_charge)
 
+    check_out_address = resolve_address_from_coords(check_out_address, check_out_lat, check_out_lng)
+
     booking.check_out_lat = Decimal(str(check_out_lat))
     booking.check_out_lng = Decimal(str(check_out_lng))
     booking.check_out_datetime = check_out_time
@@ -833,6 +840,8 @@ def direct_seat_booking_create_view(request):
             origin_place = Place.objects.get(pk=origin_place_id)
         except Place.DoesNotExist:
             return Response({'error': 'Origin place not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    check_in_address = resolve_address_from_coords(check_in_address, check_in_lat, check_in_lng)
 
     active_trip = Trip.objects.filter(vehicle=vehicle, end_time__isnull=True).order_by('-start_time').first()
     n = len(vehicle_seats)

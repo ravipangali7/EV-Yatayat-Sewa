@@ -172,6 +172,13 @@ LANGUAGE_CODE = 'en-us'
 
 TIME_ZONE = 'Asia/Kathmandu'
 
+# Nominatim (reverse geocoding) requires an identifying User-Agent:
+# https://operations.osmfoundation.org/policies/nominatim/
+NOMINATIM_USER_AGENT = os.environ.get(
+    'NOMINATIM_USER_AGENT',
+    'EV-Yatayat-Sewa/1.0 (seat booking; contact: admin@evyatayatsewa.com)',
+)
+
 USE_I18N = True
 
 USE_TZ = True
