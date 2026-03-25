@@ -36,10 +36,11 @@ urlpatterns = [
 urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
 urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
-_spa_shell = []
-if getattr(settings, 'ENABLE_PUBLIC_SPA_SHELL', True):
-    _spa_shell.append(path('', include('website.frontend_urls')))
-
-urlpatterns += _spa_shell + [
-    path('', admin.site.urls),
+# /admin/ must be registered before path('', include(website.frontend_urls)) so the SPA shell
+# does not consume /admin/ (empty-prefix include tries the remainder first; inner miss => 404).
+urlpatterns += [
+    path('admin/', admin.site.urls),
 ]
+
+if getattr(settings, 'ENABLE_PUBLIC_SPA_SHELL', True):
+    urlpatterns.append(path('', include('website.frontend_urls')))

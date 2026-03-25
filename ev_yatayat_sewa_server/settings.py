@@ -53,6 +53,7 @@ AUTH_USER_MODEL = 'core.User'
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'ev_yatayat_sewa_server.middleware.SystemSubdomainRootRedirectMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -228,6 +229,8 @@ SPA_INDEX_HTML_PATH = os.environ.get(
 
 # Set false on API-only hosts (e.g. system.example.com) if you do not want Django to serve the marketing HTML shell at /.
 ENABLE_PUBLIC_SPA_SHELL = os.environ.get('ENABLE_PUBLIC_SPA_SHELL', 'true').lower() in ('1', 'true', 'yes')
+# GET / on hosts whose first label is SYSTEM_SUBDOMAIN_HOST_PREFIX (default: system) redirects to /admin/.
+# Set SYSTEM_SUBDOMAIN_ROOT_REDIRECT=0 to disable. If /admin/ still serves the React shell, check nginx/Cloudflare for try_files to index.html.
 # After production deploy: use https://developers.facebook.com/tools/debug/ to refresh og:image cache for shared links.
 
 # Node real-time server (seat-booked webhook, trip socket)
