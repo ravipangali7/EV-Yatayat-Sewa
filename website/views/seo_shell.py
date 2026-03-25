@@ -78,7 +78,9 @@ def _base_context(request, site):
     }
 
 
-def _seo_static_page(request, *, page_key: str, path: str, title_suffix: str, description_override: str = ''):
+def _seo_static_page(
+    request, *, page_key: str, path: str, title_suffix: str = '', description_override: str = ''
+):
     site = _site()
     ctx = _base_context(request, site)
     origin = ctx['canonical_origin']
