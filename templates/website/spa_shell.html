@@ -48,8 +48,25 @@
 </head>
 <body>
   <div id="root"></div>
+
+  {% if not spa_scripts %}
+    <div style="max-width: 720px; margin: 48px auto; padding: 0 16px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; line-height: 1.5;">
+      <h1 style="margin: 0 0 12px; font-size: 20px;">Frontend not loaded</h1>
+      <p style="margin: 0 0 12px; color: #444;">
+        This page is served as an SPA shell, but no Vite build assets were found to load the app.
+      </p>
+      <ul style="margin: 0 0 12px; padding-left: 18px; color: #444;">
+        <li>Build the frontend so <code>web/dist/index.html</code> exists, and serve its <code>/assets/</code> files.</li>
+        <li>Or disable the public SPA shell on this host.</li>
+      </ul>
+      <p style="margin: 0; color: #444;">
+        Admin panel: <a href="/admin/">/admin/</a>
+      </p>
+    </div>
+  {% endif %}
+
   {% for src in spa_scripts %}
-  <script type="module" src="{{ src }}"></script>
+    <script type="module" src="{{ src }}"></script>
   {% endfor %}
 </body>
 </html>
