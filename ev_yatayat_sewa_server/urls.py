@@ -41,5 +41,5 @@ if getattr(settings, 'ENABLE_PUBLIC_SPA_SHELL', True):
     _spa_shell.append(path('', include('website.frontend_urls')))
 
 urlpatterns += _spa_shell + [
-    path('', admin.site.urls),
+    path('/admin', admin.site.urls),
 ]
