@@ -420,6 +420,7 @@ def trip_detail_get_view(request, pk):
             'seat_bookings__user',
             'seat_bookings__vehicle_seat',
             'seat_bookings__destination_place',
+            'seat_bookings__origin_place',
             'vehicle_schedule__ticket_bookings',
             'vehicle_schedule__ticket_bookings__pickup_point',
             'vehicle_schedule__ticket_bookings__destination_point',
@@ -477,7 +478,7 @@ def trip_detail_get_view(request, pk):
 
     # Seat bookings with full nested data
     seat_bookings = trip.seat_bookings.all().select_related(
-        'user', 'vehicle', 'vehicle_seat', 'destination_place'
+        'user', 'vehicle', 'vehicle_seat', 'destination_place', 'origin_place'
     ).order_by('check_in_datetime')
     data['seat_bookings'] = SeatBookingSerializer(seat_bookings, many=True).data
 
