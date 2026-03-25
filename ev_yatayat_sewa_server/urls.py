@@ -18,6 +18,7 @@ from django.contrib import admin
 from django.urls import path, include, re_path
 from django.conf import settings
 from django.conf.urls.static import static
+from django.views.generic import RedirectView
 from core.views.media_views import serve_media
 from website.views.sitemap_robots import robots_txt_view, sitemap_view
 
@@ -41,5 +42,9 @@ if getattr(settings, 'ENABLE_PUBLIC_SPA_SHELL', True):
     _spa_shell.append(path('', include('website.frontend_urls')))
 
 urlpatterns += _spa_shell + [
-    path('', admin.site.urls),
+    path('admin/', admin.site.urls),
 ]
+
+# On API/admin-only hosts (e.g. system.*), make the root URL go to the admin.
+if not getattr(settings, 'ENABLE_PUBLIC_SPA_SHELL', True):
+    urlpatterns.append(path('', RedirectView.as_view(url='/admin/', permanent=False)))
