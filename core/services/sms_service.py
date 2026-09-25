@@ -4,7 +4,7 @@ from urllib.parse import urlencode
 
 # SMS API Configuration
 SMS_API_KEY = '568383D0C5AA82'
-SMS_API_URL = 'https://sms.kaichogroup.com/smsapi/index.php'
+SMS_API_URL = 'https://samayasms.com.np/smsapi/index.php'
 SMS_CAMPAIGN_ID = '9148'
 SMS_ROUTE_ID = '130'
 SMS_SENDER_ID = 'SMSBit'
@@ -12,7 +12,7 @@ SMS_TIMEOUT = 30  # seconds
 
 
 class SMSService:
-    """Service for sending SMS via Kaicho Group API"""
+    """Service for sending SMS via Samaye SMS API"""
     
     @staticmethod
     def send_sms(phone_number: str, message: str) -> dict:
