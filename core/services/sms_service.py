@@ -1,18 +1,56 @@
+import json
+
 import requests
-from django.conf import settings
 from urllib.parse import urlencode
 
 # SMS API Configuration
 SMS_API_KEY = '36AB90E6EA58F8'
 SMS_API_URL = 'https://sms.smspasal.com/smsapi/index.php'
-SMS_CAMPAIGN_ID = '9148'
-SMS_ROUTE_ID = '130'
-SMS_SENDER_ID = 'SMSBit'
+SMS_SENDER_ID = 'TN_ALERT'
 SMS_TIMEOUT = 30  # seconds
 
 
 class SMSService:
     """Service for sending SMS via SMS Pasal API"""
+
+    @staticmethod
+    def _is_success(response_text: str) -> tuple:
+        """Return (success, detail) for a plain or JSON SMS Pasal body."""
+        text = (response_text or '').strip()
+        if not text:
+            return False, 'Empty SMS API response'
+        if 'SMS-SHOOT-ID' in text:
+            return True, text
+        if 'ERR:' in text:
+            return False, text
+
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            lowered = text.lower()
+            if 'success' in lowered and 'error' not in lowered and 'fail' not in lowered:
+                return True, text
+            return False, text
+
+        payload = data[0] if isinstance(data, list) and data else data
+        if not isinstance(payload, dict):
+            return False, text
+
+        code = payload.get('response_code', payload.get('statusCode', payload.get('code')))
+        status = str(payload.get('status', payload.get('success', ''))).strip().lower()
+        detail = str(
+            payload.get('response')
+            or payload.get('message')
+            or payload.get('reason')
+            or text
+        )
+        if status in ('error', 'failed', 'fail', 'false'):
+            return False, detail
+        if str(code) in ('200', '202', '0') or status in ('success', 'true', 'ok', 'sent'):
+            return True, detail
+        if 'success' in detail.lower() and 'error' not in detail.lower():
+            return True, detail
+        return False, detail
     
     @staticmethod
     def send_sms(phone_number: str, message: str) -> dict:
@@ -29,38 +67,28 @@ class SMSService:
         try:
             params = {
                 'key': SMS_API_KEY,
-                'campaign': SMS_CAMPAIGN_ID,
-                'routeid': SMS_ROUTE_ID,
-                'type': 'text',
                 'contacts': phone_number,
                 'senderid': SMS_SENDER_ID,
-                'msg': message
+                'msg': message,
+                'responsetype': 'json',
             }
             
             url = f"{SMS_API_URL}?{urlencode(params)}"
             
             response = requests.get(url, timeout=SMS_TIMEOUT)
             response_text = response.text.strip()
-            
-            # Check if response indicates success
-            if 'SMS-SHOOT-ID' in response_text:
+            success, detail = SMSService._is_success(response_text)
+            if success:
                 return {
                     'success': True,
                     'message': 'SMS sent successfully',
                     'response': response_text
                 }
-            elif 'ERR:' in response_text:
-                return {
-                    'success': False,
-                    'message': f'SMS service error: {response_text}',
-                    'response': response_text
-                }
-            else:
-                return {
-                    'success': False,
-                    'message': f'Unexpected SMS API response: {response_text}',
-                    'response': response_text
-                }
+            return {
+                'success': False,
+                'message': f'SMS service error: {detail}',
+                'response': response_text
+            }
                 
         except requests.exceptions.Timeout:
             return {
