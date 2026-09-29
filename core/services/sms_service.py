@@ -8,7 +8,7 @@ SMS_API_KEY = '36AB90E6EA58F8'
 SMS_API_URL = 'https://sms.smspasal.com/smsapi/index.php'
 SMS_CAMPAIGN_ID = '9823'
 SMS_ROUTE_ID = '10305'
-SMS_SENDER_ID = 'TN_ALERT'
+SMS_SENDER_ID = 'Bit_Alert'
 SMS_TIMEOUT = 30  # seconds
 
 
