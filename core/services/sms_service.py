@@ -6,6 +6,8 @@ from urllib.parse import urlencode
 # SMS API Configuration
 SMS_API_KEY = '36AB90E6EA58F8'
 SMS_API_URL = 'https://sms.smspasal.com/smsapi/index.php'
+SMS_CAMPAIGN_ID = '9823'
+SMS_ROUTE_ID = '10305'
 SMS_SENDER_ID = 'TN_ALERT'
 SMS_TIMEOUT = 30  # seconds
 
@@ -67,10 +69,12 @@ class SMSService:
         try:
             params = {
                 'key': SMS_API_KEY,
+                'campaign': SMS_CAMPAIGN_ID,
+                'routeid': SMS_ROUTE_ID,
+                'type': 'text',
                 'contacts': phone_number,
                 'senderid': SMS_SENDER_ID,
                 'msg': message,
-                'responsetype': 'json',
             }
             
             url = f"{SMS_API_URL}?{urlencode(params)}"
