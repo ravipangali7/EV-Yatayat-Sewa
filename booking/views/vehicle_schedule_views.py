@@ -5,8 +5,9 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 
-from ..models import VehicleSchedule, Vehicle, Route, Place, VehicleTicketBooking, RouteStopPoint
-from ..route_order import get_route_place_order
+from ..models import VehicleSchedule, Vehicle, Route, Place, VehicleTicketBooking
+from ..route_order import get_route_place_order, get_route_ordered_points
+from ..fare import get_default_price_per_km, quote_segment
 
 
 def _route_place_order(route):
@@ -35,10 +36,30 @@ def _schedule_contains_place_before(schedule, from_place_id, to_place_id):
     return order_map[from_place_id] < order_map[to_place_id]
 
 
-def _schedule_to_response(s):
+def _money(value):
+    if value is None:
+        return None
+    return str(value)
+
+
+def _optional_decimal(raw):
+    if raw is None or str(raw).strip() == '':
+        return None
+    return Decimal(str(raw))
+
+
+def _ordered_places(schedule):
+    points = get_route_ordered_points(schedule.route, getattr(schedule, 'reverse_direction', False))
+    return [
+        {'id': str(place.id), 'name': place.name, 'code': place.code}
+        for _, place, _ in points
+    ]
+
+
+def _schedule_to_response(s, include_places=False):
     v = getattr(s, 'vehicle', None)
     r = getattr(s, 'route', None)
-    return {
+    data = {
         'id': str(s.id),
         'vehicle': str(s.vehicle_id),
         'vehicle_name': v.name if v else None,
@@ -48,10 +69,14 @@ def _schedule_to_response(s):
         'date': s.date.isoformat(),
         'time': s.time.strftime('%H:%M:%S') if s.time else None,
         'price': str(s.price),
+        'price_per_km': _money(s.price_per_km),
         'reverse_direction': getattr(s, 'reverse_direction', False),
         'created_at': s.created_at.isoformat(),
         'updated_at': s.updated_at.isoformat(),
     }
+    if include_places:
+        data['places'] = _ordered_places(s)
+    return data
 
 
 def _build_media_url(request, path):
@@ -107,6 +132,7 @@ def _schedule_to_response_expanded(s, request):
         'date': s.date.isoformat(),
         'time': (s.time.strftime('%H:%M') if s.time else None),
         'price': str(s.price),
+        'price_per_km': _money(s.price_per_km),
         'reverse_direction': getattr(s, 'reverse_direction', False),
         'created_at': s.created_at.isoformat(),
         'updated_at': s.updated_at.isoformat(),
@@ -117,18 +143,19 @@ def _schedule_to_response_expanded(s, request):
 
 @api_view(['GET'])
 def vehicle_schedule_start_places_view(request):
-    """All places that appear on any vehicle_schedule route: start + stop_points + end, distinct, by name."""
-    # Routes that have at least one VehicleSchedule
-    route_ids = VehicleSchedule.objects.values_list('route_id', flat=True).distinct()
-    routes = Route.objects.filter(id__in=route_ids).prefetch_related(
-        'start_point', 'end_point', 'stop_points__place'
+    """Places a passenger can board: any stop that is not the last stop of at least one existing schedule."""
+    schedules = VehicleSchedule.objects.select_related('route').prefetch_related(
+        'route__start_point', 'route__end_point', 'route__stop_points__place'
     )
     place_ids = set()
-    for route in routes:
-        place_ids.add(route.start_point_id)
-        place_ids.add(route.end_point_id)
-        for sp in route.stop_points.all():
-            place_ids.add(sp.place_id)
+    for schedule in schedules:
+        order_map = _schedule_place_order(schedule)
+        if not order_map:
+            continue
+        last_order = max(order_map.values())
+        for place_id, order in order_map.items():
+            if order < last_order:
+                place_ids.add(place_id)
     places = Place.objects.filter(id__in=place_ids).order_by('name')
     return Response([
         {'id': str(p.id), 'name': p.name, 'code': p.code}
@@ -175,25 +202,17 @@ def vehicle_schedule_end_places_view(request):
         except Route.DoesNotExist:
             pass
     else:
-        route_ids = VehicleSchedule.objects.values_list('route_id', flat=True).distinct()
-        routes = Route.objects.filter(id__in=route_ids).prefetch_related(
-            'start_point', 'end_point', 'stop_points__place'
+        schedules = VehicleSchedule.objects.select_related('route').prefetch_related(
+            'route__start_point', 'route__end_point', 'route__stop_points__place'
         )
-        for route in routes:
-            order_map = _route_place_order(route)
+        for schedule in schedules:
+            order_map = _schedule_place_order(schedule)
             if from_place_id not in order_map:
                 continue
             from_order = order_map[from_place_id]
-            for pid, o in order_map.items():
-                if o > from_order:
+            for pid, order in order_map.items():
+                if order > from_order:
                     place_ids.add(pid)
-            if route.is_bidirectional:
-                order_map_reverse = get_route_place_order(route, reverse=True)
-                if from_place_id in order_map_reverse:
-                    from_order_rev = order_map_reverse[from_place_id]
-                    for pid, o in order_map_reverse.items():
-                        if o > from_order_rev:
-                            place_ids.add(pid)
     places = Place.objects.filter(id__in=place_ids).order_by('name')
     return Response([
         {'id': str(p.id), 'name': p.name, 'code': p.code}
@@ -325,6 +344,7 @@ def vehicle_schedule_list_get_view(request):
                 return 1
             return 0
 
+        default_rate = get_default_price_per_km() if (from_place and to_place) else None
         results = []
         for s in items:
             v = vehicle_map.get(s.vehicle_id) or s.vehicle
@@ -341,6 +361,14 @@ def vehicle_schedule_list_get_view(request):
                 to_order = order_map.get(int(to_place), -1)
                 booked_for_segment = _booked_seats_for_segment(s, from_order, to_order, order_map)
                 seats_used = len(booked_for_segment)
+                quote = quote_segment(s, from_place, to_place, default_rate=default_rate)
+                row['segment_price'] = str(quote['unit_price'])
+                row['segment_km'] = str(quote['distance_km'])
+                row['segment_price_per_km'] = str(quote['price_per_km'])
+                row['is_full_route'] = quote['is_full_route']
+                row['booked_seats'] = [
+                    {'side': side, 'number': number} for side, number in sorted(booked_for_segment)
+                ]
             else:
                 seats_used = 0
                 for b in VehicleTicketBooking.objects.filter(vehicle_schedule=s).only('seat'):
@@ -391,8 +419,16 @@ def vehicle_schedule_list_post_view(request):
         reverse_direction = reverse_direction is True or (isinstance(reverse_direction, str) and reverse_direction.lower() == 'true')
     else:
         reverse_direction = False
+    price_per_km_raw = request.data.get('price_per_km') if hasattr(request, 'data') else None
+    if price_per_km_raw is None:
+        price_per_km_raw = request.POST.get('price_per_km')
+    try:
+        price_per_km = _optional_decimal(price_per_km_raw)
+    except (ValueError, TypeError, ArithmeticError):
+        return Response({'error': 'Invalid price_per_km'}, status=status.HTTP_400_BAD_REQUEST)
     s = VehicleSchedule.objects.create(
         vehicle=vehicle, route=route, date=d, time=t, price=Decimal(str(price)),
+        price_per_km=price_per_km,
         reverse_direction=reverse_direction,
     )
     return Response(_schedule_to_response(s), status=status.HTTP_201_CREATED)
@@ -401,10 +437,46 @@ def vehicle_schedule_list_post_view(request):
 @api_view(['GET'])
 def vehicle_schedule_detail_get_view(request, pk):
     try:
-        s = VehicleSchedule.objects.select_related('vehicle', 'route').get(pk=pk)
+        s = VehicleSchedule.objects.select_related(
+            'vehicle', 'route', 'route__start_point', 'route__end_point'
+        ).prefetch_related('route__stop_points__place').get(pk=pk)
     except VehicleSchedule.DoesNotExist:
         return Response({'error': 'Vehicle schedule not found'}, status=status.HTTP_404_NOT_FOUND)
-    return Response(_schedule_to_response(s))
+    return Response(_schedule_to_response(s, include_places=True))
+
+
+@api_view(['GET'])
+def vehicle_schedule_fare_view(request, pk):
+    """Unit fare for a pickup → destination on this schedule."""
+    try:
+        s = VehicleSchedule.objects.select_related(
+            'route', 'route__start_point', 'route__end_point'
+        ).prefetch_related('route__stop_points__place').get(pk=pk)
+    except VehicleSchedule.DoesNotExist:
+        return Response({'error': 'Vehicle schedule not found'}, status=status.HTTP_404_NOT_FOUND)
+    from_place = request.query_params.get('from')
+    to_place = request.query_params.get('to')
+    order_map = _schedule_place_order(s)
+    if from_place and to_place:
+        try:
+            from_id = int(from_place)
+            to_id = int(to_place)
+        except (TypeError, ValueError):
+            return Response({'error': 'Invalid from or to place'}, status=status.HTTP_400_BAD_REQUEST)
+        if from_id not in order_map or to_id not in order_map or order_map[from_id] >= order_map[to_id]:
+            return Response({'error': 'Places are not on this schedule in that order'}, status=status.HTTP_400_BAD_REQUEST)
+    quote = quote_segment(s, from_place, to_place)
+    booked = []
+    if from_place and to_place and order_map:
+        booked_set = _booked_seats_for_segment(s, order_map[int(from_place)], order_map[int(to_place)], order_map)
+        booked = [{'side': side, 'number': number} for side, number in sorted(booked_set)]
+    return Response({
+        'unit_price': str(quote['unit_price']),
+        'distance_km': str(quote['distance_km']),
+        'price_per_km': str(quote['price_per_km']),
+        'is_full_route': quote['is_full_route'],
+        'booked_seats': booked,
+    })
 
 
 @api_view(['POST'])
@@ -427,6 +499,11 @@ def vehicle_schedule_detail_post_view(request, pk):
             pass
     if 'price' in data:
         s.price = Decimal(str(data['price']))
+    if 'price_per_km' in data:
+        try:
+            s.price_per_km = _optional_decimal(data.get('price_per_km'))
+        except (ValueError, TypeError, ArithmeticError):
+            return Response({'error': 'Invalid price_per_km'}, status=status.HTTP_400_BAD_REQUEST)
     if 'vehicle' in data:
         try:
             s.vehicle = Vehicle.objects.get(pk=data['vehicle'])

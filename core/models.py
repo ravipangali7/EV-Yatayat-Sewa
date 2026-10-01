@@ -62,6 +62,7 @@ class SuperSetting(models.Model):
     """Super settings for the application"""
     id = models.BigAutoField(primary_key=True)
     per_km_charge = models.DecimalField(max_digits=10, decimal_places=2)
+    default_price_per_km = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)  # ticket segment fallback
     gps_threshold_second = models.DecimalField(max_digits=10, decimal_places=2, default=5)  # seconds between GPS sends
     point_cover_radius = models.DecimalField(max_digits=10, decimal_places=4, default=0.5, null=True, blank=True)  # km radius for at stop/start
     minute_coverage_schedule = models.IntegerField(default=60, null=True, blank=True)  # minutes before/after schedule time for scheduled start

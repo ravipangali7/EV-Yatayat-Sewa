@@ -94,7 +94,7 @@ class VehicleImageAdmin(admin.ModelAdmin):
 @admin.register(VehicleSchedule)
 class VehicleScheduleAdmin(admin.ModelAdmin):
     """VehicleSchedule admin"""
-    list_display = ('id', 'vehicle', 'route', 'date', 'time', 'price', 'created_at', 'updated_at')
+    list_display = ('id', 'vehicle', 'route', 'date', 'time', 'price', 'price_per_km', 'created_at', 'updated_at')
     list_filter = ('date', 'vehicle', 'route', 'created_at', 'updated_at')
     search_fields = ('vehicle__name', 'vehicle__vehicle_no', 'route__name')
     raw_id_fields = ('vehicle', 'route')

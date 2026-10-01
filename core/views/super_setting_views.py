@@ -18,6 +18,7 @@ def _setting_to_dict(setting):
     return {
         'id': str(setting.id),
         'per_km_charge': str(setting.per_km_charge),
+        'default_price_per_km': str(setting.default_price_per_km) if getattr(setting, 'default_price_per_km', None) is not None else None,
         'initial_km': str(setting.initial_km) if getattr(setting, 'initial_km', None) is not None else None,
         'initial_km_charge': str(setting.initial_km_charge) if getattr(setting, 'initial_km_charge', None) is not None else None,
         'gps_threshold_second': str(setting.gps_threshold_second),
@@ -134,6 +135,12 @@ def super_setting_list_post_view(request):
     except (ValueError, TypeError):
         short_trip_max_distance_for_booking = None
 
+    default_price_per_km = request.POST.get('default_price_per_km') or request.data.get('default_price_per_km')
+    try:
+        default_price_per_km = Decimal(str(default_price_per_km)) if default_price_per_km is not None and str(default_price_per_km).strip() != '' else None
+    except (ValueError, TypeError):
+        default_price_per_km = None
+
     initial_km = request.POST.get('initial_km') or request.data.get('initial_km')
     initial_km_charge = request.POST.get('initial_km_charge') or request.data.get('initial_km_charge')
     try:
@@ -150,6 +157,7 @@ def super_setting_list_post_view(request):
 
     setting = SuperSetting.objects.create(
         per_km_charge=per_km_charge,
+        default_price_per_km=default_price_per_km,
         initial_km=initial_km,
         initial_km_charge=initial_km_charge,
         gps_threshold_second=gps_threshold_second,
@@ -201,6 +209,13 @@ def super_setting_detail_post_view(request, pk):
             setting.per_km_charge = Decimal(str(per_km_charge))
         except (ValueError, TypeError):
             return Response({'error': 'Invalid per_km_charge value'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if 'default_price_per_km' in request.POST or 'default_price_per_km' in request.data:
+        val = request.POST.get('default_price_per_km') if 'default_price_per_km' in request.POST else request.data.get('default_price_per_km')
+        try:
+            setting.default_price_per_km = Decimal(str(val)) if val is not None and str(val).strip() != '' else None
+        except (ValueError, TypeError):
+            return Response({'error': 'Invalid default_price_per_km value'}, status=status.HTTP_400_BAD_REQUEST)
 
     if 'initial_km' in request.POST or 'initial_km' in request.data:
         val = request.POST.get('initial_km') or request.data.get('initial_km')

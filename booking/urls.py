@@ -91,6 +91,7 @@ urlpatterns = [
     path('vehicle-schedules/end-places/', vehicle_schedule_views.vehicle_schedule_end_places_view, name='vehicle-schedule-end-places'),
     path('vehicle-schedules/create/', vehicle_schedule_views.vehicle_schedule_list_post_view, name='vehicle-schedule-list-post'),
     path('vehicle-schedules/<int:pk>/', vehicle_schedule_views.vehicle_schedule_detail_get_view, name='vehicle-schedule-detail-get'),
+    path('vehicle-schedules/<int:pk>/fare/', vehicle_schedule_views.vehicle_schedule_fare_view, name='vehicle-schedule-fare'),
     path('vehicle-schedules/<int:pk>/edit/', vehicle_schedule_views.vehicle_schedule_detail_post_view, name='vehicle-schedule-detail-post'),
     path('vehicle-schedules/<int:pk>/delete/', vehicle_schedule_views.vehicle_schedule_delete_get_view, name='vehicle-schedule-delete'),
     # Vehicle Ticket Booking endpoints

@@ -12,6 +12,7 @@ from django.db import transaction as db_transaction
 
 from ..models import VehicleTicketBooking, VehicleSchedule, VehicleSeat, Place
 from ..route_order import get_route_place_order
+from ..fare import quote_segment
 from ..utils import date_range_to_datetime_range
 from core.models import User, Wallet
 from core.services.wallet_transaction import create_wallet_transaction
@@ -66,14 +67,25 @@ def _ticket_booking_to_response(b, include_schedule_details=False):
     if include_schedule_details and b.vehicle_schedule_id:
         vs = b.vehicle_schedule
         route = vs.route if vs else None
+        reverse = getattr(vs, 'reverse_direction', False) if vs else False
+        if route and reverse:
+            route_from = route.end_point
+            route_to = route.start_point
+        elif route:
+            route_from = route.start_point
+            route_to = route.end_point
+        else:
+            route_from = None
+            route_to = None
         data['schedule_details'] = {
             'date': vs.date.strftime('%Y-%m-%d') if vs and vs.date else None,
             'time': vs.time.strftime('%H:%M') if vs and vs.time else None,
             'price': str(vs.price) if vs else None,
             'vehicle_name': vs.vehicle.name if vs and vs.vehicle else None,
+            'vehicle_no': vs.vehicle.vehicle_no if vs and vs.vehicle else None,
             'route_name': route.name if route else None,
-            'start_point_name': route.start_point.name if route and route.start_point else None,
-            'end_point_name': route.end_point.name if route and route.end_point else None,
+            'start_point_name': b.pickup_point.name if b.pickup_point_id else (route_from.name if route_from else None),
+            'end_point_name': b.destination_point.name if b.destination_point_id else (route_to.name if route_to else None),
         }
     return data
 
@@ -97,7 +109,11 @@ def vehicle_ticket_booking_list_get_view(request):
     search = request.query_params.get('search', '').strip()
     date_from = _parse_date_vtb(request.query_params.get('date_from'))
     date_to = _parse_date_vtb(request.query_params.get('date_to'))
-    queryset = VehicleTicketBooking.objects.select_related('user', 'booked_by', 'vehicle_schedule', 'pickup_point', 'destination_point').all()
+    queryset = VehicleTicketBooking.objects.select_related(
+        'user', 'booked_by', 'vehicle_schedule', 'vehicle_schedule__vehicle',
+        'vehicle_schedule__route', 'vehicle_schedule__route__start_point',
+        'vehicle_schedule__route__end_point', 'pickup_point', 'destination_point',
+    ).all()
     if vs_id:
         queryset = queryset.filter(vehicle_schedule_id=vs_id)
     if user_id:
@@ -156,7 +172,9 @@ def vehicle_ticket_booking_list_post_view(request):
         return Response({'error': 'user required when not guest'}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        vs = VehicleSchedule.objects.select_related('vehicle', 'route').prefetch_related('route__stop_points__place').get(pk=vehicle_schedule_id)
+        vs = VehicleSchedule.objects.select_related(
+            'vehicle', 'route', 'route__start_point', 'route__end_point'
+        ).prefetch_related('route__stop_points__place').get(pk=vehicle_schedule_id)
     except VehicleSchedule.DoesNotExist:
         return Response({'error': 'Vehicle schedule not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -240,8 +258,32 @@ def vehicle_ticket_booking_list_post_view(request):
     if VehicleTicketBooking.objects.filter(ticket_id=ticket_id).exists():
         ticket_id = str(uuid.uuid4().hex)[:12].upper()
 
-    # Price = schedule price * number of seats (server-side)
-    total_price = vs.price * len(seats_list)
+    # Full route uses the schedule price. A shorter segment uses km × price per km.
+    # Staff, superusers, and ticket dealers may send manual_price to override the total.
+    manual_flag = request.POST.get('manual_price') if hasattr(request, 'POST') else None
+    if manual_flag is None and hasattr(request, 'data'):
+        manual_flag = request.data.get('manual_price')
+    manual_price = manual_flag is True or (isinstance(manual_flag, str) and manual_flag.lower() in ('true', '1', 'yes'))
+    actor = getattr(request, 'user', None)
+    can_override = bool(
+        actor and getattr(actor, 'is_authenticated', False) and (
+            getattr(actor, 'is_superuser', False)
+            or getattr(actor, 'is_staff', False)
+            or getattr(actor, 'is_ticket_dealer', False)
+        )
+    )
+    if manual_price and can_override and price not in (None, ''):
+        try:
+            total_price = Decimal(str(price)).quantize(Decimal('0.01'))
+        except (ValueError, TypeError, ArithmeticError):
+            return Response({'error': 'Invalid price'}, status=status.HTTP_400_BAD_REQUEST)
+    else:
+        quote = quote_segment(
+            vs,
+            pickup_point.id if pickup_point else None,
+            destination_point.id if destination_point else None,
+        )
+        total_price = (quote['unit_price'] * len(seats_list)).quantize(Decimal('0.01'))
 
     user = None
     booked_by = None
