@@ -252,11 +252,13 @@ def trip_end_view(request, pk):
     longitude = request.POST.get('longitude') or request.data.get('longitude')
     confirm_out_of_range = request.POST.get('confirm_out_of_range') or request.data.get('confirm_out_of_range')
     if isinstance(confirm_out_of_range, str):
-        confirm_out_of_range = confirm_out_of_range.lower() == 'true'
+        confirm_out_of_range = confirm_out_of_range.lower() in ('true', '1', 'yes')
     else:
         confirm_out_of_range = bool(confirm_out_of_range)
 
-    if not latitude or not longitude:
+    lat = _finite_float(latitude)
+    lng = _finite_float(longitude)
+    if lat is None or lng is None:
         return Response({'error': 'latitude and longitude are required'}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
@@ -264,8 +266,14 @@ def trip_end_view(request, pk):
     except Trip.DoesNotExist:
         return Response({'error': 'Trip not found'}, status=status.HTTP_404_NOT_FOUND)
 
+    # Idempotent: a previous attempt may have saved end_time and then failed
+    # while writing the location row. The driver app must be able to clear.
     if trip.end_time:
-        return Response({'error': 'Trip is already ended'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({
+            'trip': _trip_to_response(trip),
+            'within_destination': True,
+            'message': 'Trip is already ended',
+        }, status=status.HTTP_200_OK)
 
     user = request.user
     if trip.driver_id != user.id:
@@ -278,24 +286,34 @@ def trip_end_view(request, pk):
     )
     if pending:
         pending_labels = [f"{s}{n}" for s, n in pending if s and n is not None]
+        detail = f' Still on board: {", ".join(pending_labels)}.' if pending_labels else ''
         return Response({
-            'error': 'Check out all passengers first.',
+            'error': f'Check out all passengers first.{detail}',
             'pending_seat_bookings': pending_labels,
         }, status=status.HTTP_400_BAD_REQUEST)
 
     reverse = getattr(trip, 'reverse_direction', False)
-    end_place = trip.route.start_point if reverse else trip.route.end_point
-    distance_km = haversine_km(
-        float(latitude), float(longitude),
-        float(end_place.latitude), float(end_place.longitude)
-    )
+    distance_km = None
+    try:
+        route = trip.route
+        end_place = None
+        if route is not None:
+            end_place = route.start_point if reverse else route.end_point
+        if end_place is not None and end_place.latitude is not None and end_place.longitude is not None:
+            distance_km = haversine_km(
+                lat, lng,
+                float(end_place.latitude), float(end_place.longitude)
+            )
+    except (TypeError, ValueError, AttributeError):
+        distance_km = None
     try:
         ss = SuperSetting.objects.latest('created_at')
         stop_radius_km = float(ss.point_cover_radius or 1.5)
     except (SuperSetting.DoesNotExist, (TypeError, ValueError)):
         stop_radius_km = 1.5
 
-    if distance_km > stop_radius_km:
+    outside = distance_km is None or distance_km > stop_radius_km
+    if outside:
         if not confirm_out_of_range:
             return Response({
                 'within_destination': False,
@@ -310,27 +328,46 @@ def trip_end_view(request, pk):
 
     now = timezone.now()
     trip.end_time = now
-    trip.save()
+    with transaction.atomic():
+        trip.save(update_fields=['end_time', 'remarks', 'updated_at'])
+        vehicle = trip.vehicle
+        vehicle.active_driver = None
+        vehicle.active_route = None
+        vehicle.save(update_fields=['active_driver', 'active_route', 'updated_at'])
 
-    # Record location at end
-    Location.objects.create(
-        vehicle=trip.vehicle,
-        trip=trip,
-        latitude=Decimal(str(latitude)),
-        longitude=Decimal(str(longitude)),
-        speed=None,
-    )
-
-    # Clear vehicle active driver and active route when trip ends
-    vehicle = trip.vehicle
-    vehicle.active_driver = None
-    vehicle.active_route = None
-    vehicle.save()
+    try:
+        Location.objects.create(
+            vehicle=trip.vehicle,
+            trip=trip,
+            latitude=_coord_decimal(lat),
+            longitude=_coord_decimal(lng),
+            speed=None,
+        )
+    except Exception:
+        # The trip is already ended. A location-row failure must not make the
+        # client retry into "already ended" and leave the trip on screen.
+        pass
 
     return Response({
         'trip': _trip_to_response(trip),
-        'within_destination': distance_km <= stop_radius_km,
+        'within_destination': distance_km is not None and distance_km <= stop_radius_km,
     }, status=status.HTTP_200_OK)
+
+
+def _finite_float(value):
+    if value is None or value == '':
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(number) or math.isinf(number):
+        return None
+    return number
+
+
+def _coord_decimal(number):
+    return Decimal(str(number)).quantize(Decimal('0.000001'))
 
 
 def _parse_date(val):
