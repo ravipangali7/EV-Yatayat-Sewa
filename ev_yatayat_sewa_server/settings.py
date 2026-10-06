@@ -201,14 +201,48 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# NCHL ConnectIPS Payment Gateway
-NCHL_MERCHANT_ID = int(os.environ.get('NCHL_MERCHANT_ID', '4242'))
-NCHL_APP_ID = os.environ.get('NCHL_APP_ID', 'MER-4242-APP-1')
-NCHL_APP_NAME = os.environ.get('NCHL_APP_NAME', 'E.V.Yatayat Sewa Pvt.Ltd.')
-NCHL_APP_PASSWORD = os.environ.get('NCHL_APP_PASSWORD', 'Ev@yatayat#4321')
-NCHL_PFX_PATH = os.environ.get('NCHL_PFX_PATH', 'EVYATAYAT.pfx')
-NCHL_PFX_PASSWORD = os.environ.get('NCHL_PFX_PASSWORD', 'Evy@tay@t321')
-NCHL_BASE_URL = os.environ.get('NCHL_BASE_URL', 'https://login.connectips.com').rstrip('/')
+# NCHL NepalPay Gateway QR (test credentials from NCHL, 30 Sep 2026)
+NCHL_ACQUIRER_ID = os.environ.get('NCHL_ACQUIRER_ID', '00000000')
+NCHL_MERCHANT_ID = int(os.environ.get('NCHL_MERCHANT_ID', '8027'))
+NCHL_APP_ID = os.environ.get('NCHL_APP_ID', 'MER-8027-APP-1')
+NCHL_APP_NAME = os.environ.get('NCHL_APP_NAME', 'EV Yatayat')
+NCHL_MERCHANT_CATEGORY_CODE = os.environ.get('NCHL_MERCHANT_CATEGORY_CODE', '5047')
+NCHL_MERCHANT_CITY = os.environ.get('NCHL_MERCHANT_CITY', 'Kathmandu')
+NCHL_MERCHANT_COUNTRY = os.environ.get('NCHL_MERCHANT_COUNTRY', 'NP')
+NCHL_MERCHANT_POSTAL_CODE = os.environ.get('NCHL_MERCHANT_POSTAL_CODE', '44600')
+NCHL_MERCHANT_LANGUAGE = os.environ.get('NCHL_MERCHANT_LANGUAGE', 'en')
+# Basic auth for QR generation and transaction report
+NCHL_BASIC_AUTH_USERNAME = os.environ.get('NCHL_BASIC_AUTH_USERNAME', 'evyatayatgwqr')
+NCHL_BASIC_AUTH_PASSWORD = os.environ.get('NCHL_BASIC_AUTH_PASSWORD', 'Abcd@123')
+# Kept so older ConnectIPS validate calls still read a password setting
+NCHL_APP_PASSWORD = os.environ.get('NCHL_APP_PASSWORD', NCHL_BASIC_AUTH_PASSWORD)
+# NPI user id used inside the QR token string
+NCHL_USER_ID = os.environ.get('NCHL_USER_ID', 'EVYATAYATGWQR@999')
+# WebSocket API key and public key from the same NCHL mail.
+# The API key is also the HMAC secret for the payment-posting signature (txnId + billNumber).
+NCHL_API_KEY = os.environ.get('NCHL_API_KEY', 'sfHFLRZYJPCtKkdjUQH9ugMJ1ttULcyCQ1dTGXWbJSI=')
+NCHL_WS_PUBLIC_KEY = os.environ.get(
+    'NCHL_WS_PUBLIC_KEY',
+    'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAi0LF+eHiysi/etC2HBKIf1eZ6Fyr/hL'
+    'zBQ6XPMRWNMEUcruDB4dFqsHL9JuvGfFLmhITt6DLa5XhZ0cXW5b2HPh4MHcjT4e7mX+S3olAek'
+    '+2GTuF5VTICTrS8Gapln1Pbd4hZ1+vURQMaYF5QI+jHdJ6TvSBZjPFz7E/HPf2Z7eQE//5VGUbP'
+    'U4cxbfEav9npc+E2+RAbAJVHNELSm28VDwnailRIpvsyUOpizDEbSB4gpEYEDZT0iX/iZF7PTSn'
+    'vb0wVOtKXQt8nFPUi8sGzfg8yuhSQu/TYQRBoVmGAeBhsjBpF3zhsIRkhxmC7pv1Id0QtLhcNKC'
+    'o//fvq7UWDwIDAQAB',
+)
+NCHL_WS_USERNAME = os.environ.get('NCHL_WS_USERNAME', 'evyatayatgwqr')
+NCHL_WS_URL = os.environ.get('NCHL_WS_URL', 'wss://devws.nepalpay.com.np').rstrip('/')
+NCHL_PFX_PATH = os.environ.get('NCHL_PFX_PATH', 'NPI.pfx')
+NCHL_PFX_PASSWORD = os.environ.get('NCHL_PFX_PASSWORD', '123')
+NCHL_BASE_URL = os.environ.get('NCHL_BASE_URL', 'https://devopennpi.connectips.com').rstrip('/')
+NCHL_QR_GENERATE_URL = os.environ.get(
+    'NCHL_QR_GENERATE_URL',
+    f'{NCHL_BASE_URL}/qr/generateQR/gateway',
+)
+NCHL_TXN_REPORT_URL = os.environ.get(
+    'NCHL_TXN_REPORT_URL',
+    f'{NCHL_BASE_URL}/nQR/v1/merchanttxnreport',
+)
 # Resolve PFX path: relative to BASE_DIR or absolute
 if not os.path.isabs(NCHL_PFX_PATH):
     NCHL_PFX_PATH = str(BASE_DIR / NCHL_PFX_PATH)

@@ -1,9 +1,10 @@
-"""NCHL ConnectIPS payment: initiate, validate, callback, list transactions."""
+"""NepalPay Gateway QR payment: initiate QR, posting callback, status, list."""
+import base64
 import uuid
 from decimal import Decimal
 from django.utils import timezone
 from django.db import transaction as db_transaction
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
@@ -11,7 +12,7 @@ from django.conf import settings
 
 from ..models import PaymentTransaction, Wallet, User, Card
 from ..services.wallet_transaction import create_wallet_transaction
-from ..services import nchl_connectips
+from ..services import nepalpay_gateway_qr
 from booking.models import VehicleTicketBooking
 
 
@@ -138,21 +139,6 @@ def payment_initiate_view(request):
         success_url += f"&return_to={return_to}"
         failure_url += f"&return_to={return_to}"
 
-    try:
-        form_data = nchl_connectips.build_initiate_form_data(
-            reference_id=reference_id,
-            amount_npr=float(amount),
-            remarks=remarks,
-            particulars=particulars,
-            success_url=success_url,
-            failure_url=failure_url,
-        )
-    except Exception as e:
-        return Response(
-            {'error': 'Failed to build payment form', 'detail': str(e)},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
-
     pt = PaymentTransaction.objects.create(
         user=request.user,
         amount=amount,
@@ -163,7 +149,34 @@ def payment_initiate_view(request):
         card=card,
         vehicle_ticket_booking=booking,
     )
-    return Response(form_data)
+    try:
+        qr = nepalpay_gateway_qr.generate_dynamic_qr(
+            bill_number=reference_id,
+            amount_npr=amount,
+            purpose=remarks or purpose,
+            reference_label=reference_id,
+        )
+    except Exception as e:
+        pt.status = 'failed'
+        pt.error_message = str(e)
+        pt.save(update_fields=['status', 'error_message', 'updated_at'])
+        return Response(
+            {'error': 'Failed to generate payment QR', 'detail': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    pt.connectips_txn_id = qr.get('validation_trace_id') or ''
+    pt.save(update_fields=['connectips_txn_id', 'updated_at'])
+    return Response({
+        'qr_string': qr['qr_string'],
+        'validation_trace_id': qr.get('validation_trace_id') or '',
+        'reference_id': reference_id,
+        'txn_id': reference_id,
+        'payment_id': pt.id,
+        'amount': str(amount),
+        'success_url': success_url,
+        'failure_url': failure_url,
+    })
 
 
 @api_view(['POST'])
@@ -204,36 +217,41 @@ def payment_validate_view(request):
         )
 
     try:
-        nchl_resp = nchl_connectips.validatetxn(pt.reference_id, pt.amount_paisa)
+        paid_row = nepalpay_gateway_qr.find_successful_txn(pt.connectips_txn_id or '')
     except Exception as e:
-        pt.status = 'failed'
-        pt.error_message = str(e)
-        pt.save(update_fields=['status', 'error_message', 'updated_at'])
         return Response(
-            {'error': 'Validation failed', 'detail': str(e), 'payment': _payment_transaction_to_response(pt)},
+            {'error': 'Could not check payment status', 'detail': str(e), 'payment': _payment_transaction_to_response(pt)},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not paid_row:
+        return Response(
+            {'error': 'Payment not completed yet', 'payment': _payment_transaction_to_response(pt)},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    nchl_status = (nchl_resp.get('status') or nchl_resp.get('Status') or '').upper()
-    if nchl_status != 'SUCCESS':
-        pt.status = 'failed'
-        pt.error_message = nchl_resp.get('responseMessage') or nchl_resp.get('message') or str(nchl_resp)
-        pt.save(update_fields=['status', 'error_message', 'updated_at'])
-        return Response(
-            {'error': 'Payment not successful', 'payment': _payment_transaction_to_response(pt)},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+    pt = _credit_paid_payment(pt, paid_row.get('nQrTxnId') or paid_row.get('instructionId') or '')
+    return Response(_payment_transaction_to_response(pt))
 
-    pt.connectips_txn_id = nchl_resp.get('transactionId') or nchl_resp.get('transactionID') or ''
-    pt.connectips_batch_id = nchl_resp.get('batchId') or nchl_resp.get('batchID') or ''
-    pt.status = 'success'
-    pt.completed_at = timezone.now()
-    pt.save(update_fields=['connectips_txn_id', 'connectips_batch_id', 'status', 'completed_at', 'updated_at'])
 
-    wallet, _ = Wallet.objects.get_or_create(user=pt.user, defaults={'balance': 0, 'to_pay': 0, 'to_receive': 0})
-    amount = pt.amount
-
+def _credit_paid_payment(pt, batch_id=''):
+    """Mark a pending payment successful and apply wallet, card, or ticket effects once."""
     with db_transaction.atomic():
+        locked = PaymentTransaction.objects.select_for_update().select_related(
+            'user', 'card', 'vehicle_ticket_booking'
+        ).get(pk=pt.pk)
+        if locked.status == 'success':
+            return locked
+        locked.connectips_batch_id = batch_id or locked.connectips_batch_id
+        locked.status = 'success'
+        locked.completed_at = timezone.now()
+        locked.error_message = ''
+        locked.save(update_fields=[
+            'connectips_batch_id', 'status', 'completed_at', 'error_message', 'updated_at',
+        ])
+
+        wallet, _ = Wallet.objects.get_or_create(user=locked.user, defaults={'balance': 0, 'to_pay': 0, 'to_receive': 0})
+        amount = locked.amount
+        pt = locked
         if pt.purpose == PURPOSE_PAY_DUE:
             wallet.to_pay = max(Decimal('0'), wallet.to_pay - amount)
             wallet.save(update_fields=['to_pay', 'updated_at'])
@@ -245,7 +263,7 @@ def payment_validate_view(request):
                 user=pt.user,
                 amount=amount,
                 type='add',
-                remarks='NCHL ConnectIPS payment',
+                remarks='NepalPay QR payment',
                 status='success',
             )
 
@@ -312,8 +330,85 @@ def payment_validate_view(request):
                         status='success',
                     )
 
-    pt.refresh_from_db()
-    return Response(_payment_transaction_to_response(pt))
+        return locked
+
+
+def _nchl_posting_response(code, message, errors=None, http_status=200):
+    return Response(
+        {
+            'responseCode': code,
+            'responseMessage': message,
+            'classfielderrorlist': errors or [],
+        },
+        status=http_status,
+    )
+
+
+@api_view(['POST'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def nchl_payment_posting_view(request):
+    """
+    NCHL payment posting callback.
+    POST /api/nchl/payment/callback
+    Basic auth: evyatayatgwqr / password from the mail.
+    Signature: HMAC-SHA256(API key, txnId + billNumber).
+    """
+    header = request.META.get('HTTP_AUTHORIZATION', '')
+    if not header.startswith('Basic '):
+        return _nchl_posting_response('001', 'Basic authentication required', http_status=401)
+    try:
+        decoded = base64.b64decode(header.split(' ', 1)[1]).decode('utf-8')
+        username, password = decoded.split(':', 1)
+    except Exception:
+        return _nchl_posting_response('001', 'Invalid basic authentication', http_status=401)
+    if not nepalpay_gateway_qr.check_basic_auth(username, password):
+        return _nchl_posting_response('001', 'Invalid basic authentication', http_status=401)
+
+    data = request.data if isinstance(request.data, dict) else {}
+    txn_id = str(data.get('txnId') or '').strip()
+    bill_number = str(data.get('billNumber') or '').strip()
+    signature = str(data.get('signature') or '').strip()
+    if not nepalpay_gateway_qr.verify_posting_signature(txn_id, bill_number, signature):
+        return _nchl_posting_response(
+            '001',
+            'Invalid signature',
+            errors=[{'field': 'signature', 'message': 'HMAC mismatch'}],
+        )
+
+    app_id = str(data.get('appId') or '').strip()
+    expected_app = getattr(settings, 'NCHL_APP_ID', '')
+    if app_id and app_id != expected_app:
+        return _nchl_posting_response('001', 'Unknown appId', errors=[{'field': 'appId', 'message': 'Unknown app'}])
+
+    try:
+        posted_amount = Decimal(str(data.get('amount')))
+    except Exception:
+        return _nchl_posting_response(
+            '001',
+            'Amount is required',
+            errors=[{'field': 'amount', 'message': 'Amount is required'}],
+        )
+
+    try:
+        pt = PaymentTransaction.objects.select_related('user', 'card', 'vehicle_ticket_booking').get(
+            reference_id=bill_number
+        )
+    except PaymentTransaction.DoesNotExist:
+        return _nchl_posting_response('001', 'Bill not found', errors=[{'field': 'billNumber', 'message': 'Unknown bill'}])
+
+    if posted_amount != pt.amount:
+        return _nchl_posting_response(
+            '001',
+            'Failed in updating bill amount',
+            errors=[{'field': 'amount', 'message': 'Amount does not match the bill'}],
+        )
+
+    if pt.status == 'success':
+        return _nchl_posting_response('000', 'Success')
+
+    _credit_paid_payment(pt, txn_id)
+    return _nchl_posting_response('000', 'Success')
 
 
 @api_view(['GET'])
@@ -366,4 +461,12 @@ def payment_transaction_detail_view(request, pk):
         return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
     if pt.user_id != request.user.id and not getattr(request.user, 'is_superuser', False):
         return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+    sync = (request.query_params.get('sync') or '').lower() in ('1', 'true', 'yes')
+    if sync and pt.status == 'pending' and pt.connectips_txn_id:
+        try:
+            paid_row = nepalpay_gateway_qr.find_successful_txn(pt.connectips_txn_id)
+        except Exception:
+            paid_row = None
+        if paid_row:
+            pt = _credit_paid_payment(pt, paid_row.get('nQrTxnId') or paid_row.get('instructionId') or '')
     return Response(_payment_transaction_to_response(pt))

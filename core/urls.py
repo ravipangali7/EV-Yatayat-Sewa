@@ -69,6 +69,8 @@ urlpatterns = [
     path('payment/initiate/', payment_views.payment_initiate_view, name='payment-initiate'),
     path('payment/validate/', payment_views.payment_validate_view, name='payment-validate'),
     path('payment/callback/', payment_views.payment_callback_get_view, name='payment-callback'),
+    path('nchl/payment/callback', payment_views.nchl_payment_posting_view, name='nchl-payment-posting'),
+    path('nchl/payment/callback/', payment_views.nchl_payment_posting_view, name='nchl-payment-posting-slash'),
     path('payment/transactions/', payment_views.payment_transaction_list_view, name='payment-transaction-list'),
     path('payment/transactions/<int:pk>/', payment_views.payment_transaction_detail_view, name='payment-transaction-detail'),
 ]
