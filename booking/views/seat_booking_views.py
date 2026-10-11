@@ -457,7 +457,102 @@ def seat_booking_switch_view(request):
     return Response(serializer.data)
 
 
-DESTINATION_RADIUS_KM = Decimal('0.5')  # 500 meters
+def _cover_radius_km():
+    """Geofence used to decide the bus is at a stop. Never tighter than 500m, so the
+    other side of the road still counts as the destination."""
+    try:
+        ss = SuperSetting.objects.latest('created_at')
+        configured = Decimal(str(float(ss.point_cover_radius or 0.5)))
+    except (SuperSetting.DoesNotExist, TypeError, ValueError):
+        configured = Decimal('0.5')
+    if configured < Decimal('0.5'):
+        return Decimal('0.5')
+    return configured
+
+
+def _persist_seat_checkout(booking, vehicle_seat, check_out_lat, check_out_lng, check_out_address, distance, duration, trip_amount, is_paid, check_out_time):
+    """Save checkout and free the seat together. A wallet-ledger failure must not leave the seat booked."""
+    booking.check_out_lat = Decimal(str(check_out_lat))
+    booking.check_out_lng = Decimal(str(check_out_lng))
+    booking.check_out_datetime = check_out_time
+    booking.check_out_address = check_out_address
+    booking.trip_distance = distance
+    booking.trip_duration = duration
+    booking.trip_amount = trip_amount
+    booking.is_paid = is_paid.lower() == 'true' if isinstance(is_paid, str) else bool(is_paid)
+    with db_transaction.atomic():
+        booking.save()
+        vehicle_seat.status = 'available'
+        vehicle_seat.save(update_fields=['status', 'updated_at'])
+        if booking.trip_id and booking.trip_amount and booking.trip_amount > 0 and booking.trip and not getattr(booking.trip, 'is_scheduled', False):
+            driver = booking.trip.driver
+            if driver:
+                driver_wallet, _ = Wallet.objects.get_or_create(user=driver, defaults={'balance': 0, 'to_pay': 0, 'to_receive': 0})
+                balance_before = driver_wallet.balance
+                Wallet.objects.filter(pk=driver_wallet.pk).update(to_pay=F('to_pay') + booking.trip_amount)
+                driver_wallet.refresh_from_db()
+                driver_label = (booking.trip.driver.name or booking.trip.driver.phone) if booking.trip and booking.trip.driver else 'N/A'
+                trip_label = booking.trip.trip_id if booking.trip else 'N/A'
+                Transaction.objects.create(
+                    wallet=driver_wallet,
+                    user=driver,
+                    amount=booking.trip_amount,
+                    balance_before=balance_before,
+                    balance_after=driver_wallet.balance,
+                    type='add',
+                    status='success',
+                    remarks=(
+                        f'Seat trip fare | Booking #{booking.id}'
+                        f' | Seat: {vehicle_seat.side}{vehicle_seat.number}'
+                        f' | Vehicle: {booking.vehicle.vehicle_no} ({booking.vehicle.name})'
+                        f' | Driver: {driver_label}'
+                        f' | Trip: {trip_label}'
+                        f' | From: {booking.check_in_address or "N/A"}'
+                        f' \u2192 To: {booking.check_out_address or "N/A"}'
+                        f' | Distance: {booking.trip_distance} km'
+                        f' | Fare: Rs. {booking.trip_amount}'
+                    ),
+                )
+    return booking
+
+
+def release_booking_at_destination(booking, place, is_paid=True):
+    """Check a passenger out at their stop and free the seat.
+    Called after the vehicle has crossed the destination, including when GPS
+    sits on the other side of the road from the stop pin.
+    """
+    if place is None:
+        return booking
+    with db_transaction.atomic():
+        booking = (
+            SeatBooking.objects.select_for_update()
+            .select_related('vehicle_seat', 'trip', 'trip__driver', 'vehicle')
+            .get(pk=booking.pk)
+        )
+        if booking.check_out_datetime:
+            return booking
+        return _release_locked_booking(booking, place, is_paid)
+
+
+def _release_locked_booking(booking, place, is_paid):
+    vehicle_seat = booking.vehicle_seat
+    check_out_lat = place.latitude
+    check_out_lng = place.longitude
+    check_out_address = (getattr(place, 'address', None) or '').strip() or (place.name or '')
+    distance = haversine_distance(
+        booking.check_in_lat, booking.check_in_lng,
+        Decimal(str(check_out_lat)), Decimal(str(check_out_lng)),
+    )
+    check_out_time = datetime.now()
+    if booking.check_in_datetime and booking.check_in_datetime.tzinfo:
+        check_out_time = datetime.now(booking.check_in_datetime.tzinfo)
+    duration = int((check_out_time - booking.check_in_datetime).total_seconds()) if booking.check_in_datetime else 0
+    trip_amount = booking.trip_amount if booking.trip_amount is not None else Decimal('0')
+    return _persist_seat_checkout(
+        booking, vehicle_seat,
+        check_out_lat, check_out_lng, check_out_address,
+        distance, duration, trip_amount, is_paid, check_out_time,
+    )
 
 
 @api_view(['POST'])
@@ -490,11 +585,20 @@ def seat_booking_checkout_view(request):
         return Response({'error': 'Vehicle seat not found'}, status=status.HTTP_404_NOT_FOUND)
 
     try:
-        booking = SeatBooking.objects.select_related('trip', 'trip__driver', 'destination_place').filter(
+        booking = SeatBooking.objects.select_related('trip', 'trip__driver', 'destination_place', 'vehicle').filter(
             vehicle_seat=vehicle_seat,
             check_out_datetime__isnull=True
         ).latest('created_at')
     except SeatBooking.DoesNotExist:
+        # Seat row can stay "booked" after a checkout that saved the booking but never freed the seat.
+        if vehicle_seat.status != 'available':
+            vehicle_seat.status = 'available'
+            vehicle_seat.save(update_fields=['status', 'updated_at'])
+            return Response({
+                'released': True,
+                'vehicle_seat_id': str(vehicle_seat.id),
+                'message': 'Seat released',
+            }, status=status.HTTP_200_OK)
         return Response({'error': 'No active booking found for this seat'}, status=status.HTTP_404_NOT_FOUND)
 
     if place_id and booking.destination_place_id is not None:
@@ -515,13 +619,16 @@ def seat_booking_checkout_view(request):
         per_km_charge = None
 
     use_destination_coords = False
+    at_named_stop = bool(place_id) and booking.destination_place_id is not None and str(booking.destination_place_id) == str(place_id)
     if booking.destination_place_id and booking.destination_place:
         dest_place = booking.destination_place
         dist_to_dest_km = haversine_distance(
             float(check_out_lat), float(check_out_lng),
             float(dest_place.latitude), float(dest_place.longitude)
         )
-        if dist_to_dest_km <= DESTINATION_RADIUS_KM:
+        # place_id match means this is the stop the passenger was booked to, even if
+        # the GPS fix is on the opposite side of the road from the pin.
+        if at_named_stop or dist_to_dest_km <= _cover_radius_km():
             use_destination_coords = True
             check_out_lat = dest_place.latitude
             check_out_lng = dest_place.longitude
@@ -569,49 +676,11 @@ def seat_booking_checkout_view(request):
         trip_amount = _trip_amount_from_distance(distance, per_km_charge, initial_km, initial_km_charge)
 
     check_out_address = resolve_address_from_coords(check_out_address, check_out_lat, check_out_lng)
-
-    booking.check_out_lat = Decimal(str(check_out_lat))
-    booking.check_out_lng = Decimal(str(check_out_lng))
-    booking.check_out_datetime = check_out_time
-    booking.check_out_address = check_out_address
-    booking.trip_distance = distance
-    booking.trip_duration = duration
-    booking.trip_amount = trip_amount
-    booking.is_paid = is_paid.lower() == 'true' if isinstance(is_paid, str) else bool(is_paid)
-    booking.save()
-
-    vehicle_seat.status = 'available'
-    vehicle_seat.save()
-
-    if booking.trip_id and booking.trip_amount and booking.trip_amount > 0 and booking.trip and not getattr(booking.trip, 'is_scheduled', False):
-        driver = booking.trip.driver
-        if driver:
-            driver_wallet, _ = Wallet.objects.get_or_create(user=driver, defaults={'balance': 0, 'to_pay': 0, 'to_receive': 0})
-            balance_before = driver_wallet.balance
-            Wallet.objects.filter(pk=driver_wallet.pk).update(to_pay=F('to_pay') + booking.trip_amount)
-            driver_wallet.refresh_from_db()
-            driver_label = (booking.trip.driver.name or booking.trip.driver.phone) if booking.trip and booking.trip.driver else 'N/A'
-            trip_label = booking.trip.trip_id if booking.trip else 'N/A'
-            Transaction.objects.create(
-                wallet=driver_wallet,
-                user=driver,
-                amount=booking.trip_amount,
-                balance_before=balance_before,
-                balance_after=driver_wallet.balance,
-                type='add',
-                status='success',
-                remarks=(
-                    f'Seat trip fare | Booking #{booking.id}'
-                    f' | Seat: {vehicle_seat.side}{vehicle_seat.number}'
-                    f' | Vehicle: {booking.vehicle.vehicle_no} ({booking.vehicle.name})'
-                    f' | Driver: {driver_label}'
-                    f' | Trip: {trip_label}'
-                    f' | From: {booking.check_in_address or "N/A"}'
-                    f' \u2192 To: {booking.check_out_address or "N/A"}'
-                    f' | Distance: {booking.trip_distance} km'
-                    f' | Fare: Rs. {booking.trip_amount}'
-                ),
-            )
+    _persist_seat_checkout(
+        booking, vehicle_seat,
+        check_out_lat, check_out_lng, check_out_address,
+        distance, duration, trip_amount, is_paid, check_out_time,
+    )
 
     serializer = SeatBookingSerializer(booking)
     return Response(serializer.data)

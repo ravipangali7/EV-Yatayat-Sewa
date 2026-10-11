@@ -7,7 +7,7 @@ from django.db.models import Q, Subquery, OuterRef, Exists
 from decimal import Decimal
 import json
 from datetime import datetime
-from ..models import Vehicle, VehicleSeat, VehicleImage, Route, Trip, Location
+from ..models import Vehicle, VehicleSeat, VehicleImage, Route, Trip, Location, SeatBooking
 from ..route_order import get_route_ordered_points
 from core.models import User, SuperSetting
 
@@ -1798,8 +1798,23 @@ def vehicle_my_active_get_view(request):
             },
         })
     
+    open_seat_ids = set(
+        SeatBooking.objects.filter(
+            vehicle=vehicle,
+            check_out_datetime__isnull=True,
+            trip__end_time__isnull=True,
+        ).values_list('vehicle_seat_id', flat=True)
+    )
     seats = []
     for seat in vehicle.seats.all().order_by('side', 'number'):
+        # A booked row with no open trip booking is stuck and must be available again.
+        if seat.id in open_seat_ids:
+            if seat.status != 'booked':
+                seat.status = 'booked'
+                seat.save(update_fields=['status', 'updated_at'])
+        elif seat.status == 'booked':
+            seat.status = 'available'
+            seat.save(update_fields=['status', 'updated_at'])
         seats.append({
             'id': str(seat.id),
             'vehicle': str(seat.vehicle.id),

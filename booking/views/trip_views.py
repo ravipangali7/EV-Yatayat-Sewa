@@ -101,14 +101,18 @@ def trip_start_view(request):
     # Confirm scheduled: create Trip + SeatBookings
     if vehicle_schedule_id:
         try:
-            vs = VehicleSchedule.objects.select_related('vehicle', 'route', 'route__start_point').prefetch_related(
-                'ticket_bookings', 'ticket_bookings__user'
+            vs = VehicleSchedule.objects.select_related(
+                'vehicle', 'route', 'route__start_point', 'route__end_point',
+            ).prefetch_related(
+                'ticket_bookings', 'ticket_bookings__user',
+                'ticket_bookings__pickup_point', 'ticket_bookings__destination_point',
             ).get(pk=vehicle_schedule_id, vehicle=vehicle, date=today)
         except VehicleSchedule.DoesNotExist:
             return Response({'error': 'Vehicle schedule not found or not for today'}, status=status.HTTP_404_NOT_FOUND)
         route = vs.route
         reverse = getattr(vs, 'reverse_direction', False)
         start_place = route.end_point if reverse else route.start_point
+        end_place = route.start_point if reverse else route.end_point
         start_addr = getattr(start_place, 'address', None) or f"{start_place.name}"
 
         scheduled_created_seats = []
@@ -140,6 +144,8 @@ def trip_start_view(request):
                         vseat = VehicleSeat.objects.get(vehicle=vehicle, side=side, number=num)
                     except VehicleSeat.DoesNotExist:
                         continue
+                    origin_place = tb.pickup_point or start_place
+                    dest_place = tb.destination_point or end_place
                     SeatBooking.objects.create(
                         user=tb.user,
                         is_guest=tb.is_guest,
@@ -158,15 +164,20 @@ def trip_start_view(request):
                         trip_duration=None,
                         trip_amount=amount_per_seat,
                         is_paid=True,
+                        origin_place=origin_place,
+                        destination_place=dest_place,
                     )
-                    user_name = (tb.user.name if tb.user else None) or (tb.user.username if tb.user else None) or 'Guest'
+                    if vseat.status != 'booked':
+                        vseat.status = 'booked'
+                        vseat.save(update_fields=['status', 'updated_at'])
+                    user_name = (tb.name or '').strip() or (tb.user.name if tb.user else None) or (tb.user.username if tb.user else None) or 'Guest'
                     scheduled_created_seats.append({
                         'vehicle_seat_id': vseat.id,
                         'side': vseat.side,
                         'number': vseat.number,
                         'user_name': user_name,
                         'from_address': start_addr,
-                        'to_name': '',
+                        'to_name': dest_place.name if dest_place else '',
                     })
         if scheduled_created_seats:
             notify_node_seat_booked(trip.trip_id, vehicle.id, scheduled_created_seats)
@@ -441,6 +452,96 @@ def _location_to_response(loc):
     }
 
 
+def _announcement_text_for_stop(place, rsp, header):
+    """Stop speech, including the route terminus. Start and end points have no RouteStopPoint row."""
+    custom = (getattr(rsp, 'announcement_text', None) or '').strip() if rsp is not None else ''
+    if custom:
+        return custom[:500]
+    name = (getattr(place, 'name', None) or '').strip()
+    if header:
+        return (header.replace('$x', name).replace('$X', name).strip() or name)[:500]
+    return name[:500]
+
+
+def _segment_projection_km(lat, lng, lat1, lng1, lat2, lng2):
+    """Project a point onto a segment. Returns (t 0..1, cross-track km)."""
+    lat_scale = 110.574
+    lng_scale = 111.320 * math.cos(math.radians((lat1 + lat2) / 2.0))
+    bx = (lng2 - lng1) * lng_scale
+    by = (lat2 - lat1) * lat_scale
+    px = (lng - lng1) * lng_scale
+    py = (lat - lat1) * lat_scale
+    ab2 = bx * bx + by * by
+    if ab2 <= 1e-12:
+        return 0.0, math.hypot(px, py)
+    t = max(0.0, min(1.0, (px * bx + py * by) / ab2))
+    return t, math.hypot(px - t * bx, py - t * by)
+
+
+def _route_cumulative_km(points):
+    cum = [0.0]
+    for i in range(1, len(points)):
+        prev = points[i - 1][1]
+        cur = points[i][1]
+        if prev is None or cur is None or prev.latitude is None or cur.latitude is None or prev.longitude is None or cur.longitude is None:
+            cum.append(cum[-1])
+            continue
+        cum.append(cum[-1] + haversine_km(prev.latitude, prev.longitude, cur.latitude, cur.longitude))
+    return cum
+
+
+def _project_progress_km(points, cum, lat, lng):
+    if len(points) <= 1:
+        return 0.0
+    best_dist = float('inf')
+    best_progress = 0.0
+    for i in range(len(points) - 1):
+        a = points[i][1]
+        b = points[i + 1][1]
+        if a is None or b is None or a.latitude is None or b.latitude is None:
+            continue
+        t, dist = _segment_projection_km(
+            lat, lng,
+            float(a.latitude), float(a.longitude),
+            float(b.latitude), float(b.longitude),
+        )
+        if dist < best_dist:
+            best_dist = dist
+            best_progress = cum[i] + t * (cum[i + 1] - cum[i])
+    return best_progress
+
+
+def select_reached_stop_index(points, lat, lng, radius_km, approach_km=0.02):
+    """
+    Route index of the stop the vehicle has reached.
+
+    A later stop that is still inside the cover radius wins once the bus has
+    crossed up to it. That is the case when the previous pin is on the other
+    side of the road and its circle would otherwise hide the destination.
+    Returns (index, crossed) or (None, False).
+    """
+    if not points:
+        return None, False
+    cum = _route_cumulative_km(points)
+    progress = _project_progress_km(points, cum, float(lat), float(lng))
+    reached = []
+    nearest = None
+    for i, (_kind, place, _rsp) in enumerate(points):
+        if place is None or place.latitude is None or place.longitude is None:
+            continue
+        dist = haversine_km(lat, lng, place.latitude, place.longitude)
+        if dist <= radius_km:
+            if nearest is None or dist < nearest[0]:
+                nearest = (dist, i)
+            if progress + approach_km >= cum[i]:
+                reached.append(i)
+    if reached:
+        return reached[-1], True
+    if nearest is not None:
+        return nearest[1], False
+    return None, False
+
+
 @api_view(['GET'])
 def trip_detail_get_view(request, pk):
     """Get single trip with locations, seat_bookings, revenue, vehicle_schedule, ticket_bookings."""
@@ -480,17 +581,28 @@ def trip_detail_get_view(request, pk):
     if route:
         reverse = getattr(trip, 'reverse_direction', False)
         points = get_route_ordered_points(route, reverse)
+        try:
+            header = (getattr(SuperSetting.objects.latest('created_at'), 'stop_point_announcement_header', None) or '').strip()
+        except SuperSetting.DoesNotExist:
+            header = ''
+        open_dest_ids = set(
+            SeatBooking.objects.filter(trip=trip, check_out_datetime__isnull=True)
+            .exclude(destination_place_id=None)
+            .values_list('destination_place_id', flat=True)
+        )
+        if trip.vehicle_schedule_id:
+            ticket_qs = trip.vehicle_schedule.ticket_bookings.all()
+            open_dest_ids.update(
+                ticket_qs.exclude(destination_point_id=None).values_list('destination_point_id', flat=True)
+            )
+            if ticket_qs.filter(destination_point_id__isnull=True).exists():
+                terminus = route.start_point if reverse else route.end_point
+                if terminus is not None:
+                    open_dest_ids.add(terminus.id)
         stop_points = []
         for order_idx, (kind, place, rsp) in enumerate(points):
-            if kind == 'start' or kind == 'end':
-                announcement_text = ''
-            else:
-                announcement_text = getattr(rsp, 'announcement_text', '') or '' if rsp else ''
-            has_destination_booking = SeatBooking.objects.filter(
-                trip=trip,
-                destination_place_id=place.id,
-                check_out_datetime__isnull=True,
-            ).exists()
+            announcement_text = _announcement_text_for_stop(place, rsp, header)
+            has_destination_booking = place.id in open_dest_ids
             stop_points.append({
                 'place_id': str(place.id),
                 'order': order_idx,
@@ -621,104 +733,151 @@ def trip_current_stop_view(request):
     points = get_route_ordered_points(route, reverse)
 
     lat_f, lng_f = float(lat), float(lng)
-    for _kind, place, rsp in points:
-        dist = haversine_km(lat_f, lng_f, float(place.latitude), float(place.longitude))
-        if dist <= radius_km:
-            if rsp is not None:
-                custom = (getattr(rsp, 'announcement_text', None) or '').strip()
-                if custom:
-                    announcement_text = custom
-                elif header:
-                    name = (place.name or '').strip()
-                    announcement_text = (header.replace('$x', name).replace('$X', name).strip() or name)[:500]
-                else:
-                    announcement_text = (place.name or '')[:500]
-            else:
-                announcement_text = ''
-            pickups = []
-            if trip.is_scheduled and trip.vehicle_schedule_id:
-                for vtb in trip.vehicle_schedule.ticket_bookings.filter(pickup_point_id=place.id).select_related('pickup_point'):
-                    seat_str = str(vtb.seat) if isinstance(vtb.seat, (dict, list)) else vtb.seat
-                    if isinstance(vtb.seat, list):
-                        seat_str = ', '.join(f"{s.get('side', '')}{s.get('number', '')}" for s in vtb.seat if isinstance(s, dict))
-                    pickups.append({
-                        'pnr': vtb.pnr,
-                        'name': vtb.name,
-                        'phone': vtb.phone,
-                        'seat': seat_str,
-                    })
-            for sb in SeatBooking.objects.filter(
-                trip=trip,
-                origin_place_id=place.id,
-                check_out_datetime__isnull=True,
-            ).select_related('user', 'vehicle_seat'):
+    chosen_index, crossed = select_reached_stop_index(points, lat_f, lng_f, radius_km)
+    if chosen_index is None:
+        return Response({'at_stop': None}, status=status.HTTP_200_OK)
+
+    for idx, (_kind, place, rsp) in enumerate(points):
+        if idx != chosen_index:
+            continue
+        announcement_text = _announcement_text_for_stop(place, rsp, header)
+        pickups = []
+        if trip.is_scheduled and trip.vehicle_schedule_id:
+            for vtb in trip.vehicle_schedule.ticket_bookings.filter(pickup_point_id=place.id).select_related('pickup_point'):
+                seat_str = str(vtb.seat) if isinstance(vtb.seat, (dict, list)) else vtb.seat
+                if isinstance(vtb.seat, list):
+                    seat_str = ', '.join(f"{s.get('side', '')}{s.get('number', '')}" for s in vtb.seat if isinstance(s, dict))
                 pickups.append({
-                    'pnr': '',
-                    'name': sb.user.name if sb.user else 'Guest',
-                    'phone': getattr(sb.user, 'phone', None) or '',
-                    'seat': f"{sb.vehicle_seat.side}{sb.vehicle_seat.number}",
+                    'pnr': vtb.pnr,
+                    'name': vtb.name,
+                    'phone': vtb.phone,
+                    'seat': seat_str,
                 })
-            dropoffs = []
-            # All seat bookings (scheduled or not) whose destination is this stop and not yet checked out
-            for sb in SeatBooking.objects.filter(
+        for sb in SeatBooking.objects.filter(
+            trip=trip,
+            origin_place_id=place.id,
+            check_out_datetime__isnull=True,
+        ).select_related('user', 'vehicle_seat'):
+            pickups.append({
+                'pnr': '',
+                'name': sb.user.name if sb.user else 'Guest',
+                'phone': getattr(sb.user, 'phone', None) or '',
+                'seat': f"{sb.vehicle_seat.side}{sb.vehicle_seat.number}",
+            })
+        booking_select = (
+            'vehicle_seat', 'user', 'trip', 'trip__driver', 'vehicle', 'destination_place', 'origin_place',
+        )
+        open_bookings = list(
+            SeatBooking.objects.filter(
                 trip=trip,
                 destination_place_id=place.id,
                 check_out_datetime__isnull=True,
-            ).select_related('vehicle_seat'):
-                seat_label = f"{sb.vehicle_seat.side}{sb.vehicle_seat.number}"
-                dropoffs.append({
-                    'booking_id': str(sb.id),
-                    'vehicle_seat_id': str(sb.vehicle_seat_id),
-                    'seat_label': seat_label,
-                    'name': sb.user.name if sb.user else 'Guest',
-                    'pnr': '',
-                    'trip_amount': str(sb.trip_amount) if sb.trip_amount is not None else '0',
-                })
-            # For scheduled trips, also include ticket dropoffs at this destination (in case no SeatBooking yet)
-            existing_seat_ids = {d['vehicle_seat_id'] for d in dropoffs}
-            if trip.is_scheduled and trip.vehicle_schedule_id and trip.vehicle_id:
-                vehicle_seat_by_key = {(vs.side, vs.number): vs for vs in trip.vehicle.seats.all()}
-                for vtb in trip.vehicle_schedule.ticket_bookings.filter(destination_point_id=place.id).select_related('destination_point'):
-                    seat_list = vtb.seat if isinstance(vtb.seat, list) else ([vtb.seat] if vtb.seat and isinstance(vtb.seat, dict) else [])
-                    for seat_item in seat_list:
-                        if not isinstance(seat_item, dict):
-                            continue
-                        side = str(seat_item.get('side', '')).strip()
-                        num = seat_item.get('number')
-                        if num is not None:
-                            try:
-                                num = int(num)
-                            except (TypeError, ValueError):
-                                continue
-                        else:
-                            continue
-                        vs = vehicle_seat_by_key.get((side, num))
-                        if vs is None or str(vs.id) in existing_seat_ids:
-                            continue
-                        existing_seat_ids.add(str(vs.id))
-                        seat_label = f"{side}{num}"
-                        dropoffs.append({
-                            'booking_id': f"ticket_{vtb.id}",
-                            'vehicle_seat_id': str(vs.id),
-                            'seat_label': seat_label,
-                            'name': vtb.name or 'Guest',
-                            'pnr': vtb.pnr or '',
-                            'trip_amount': str(vtb.price) if vtb.price is not None else '0',
-                        })
-            has_destination_booking = SeatBooking.objects.filter(
-                trip=trip,
-                destination_place_id=place.id,
-                check_out_datetime__isnull=True,
-            ).exists()
-            return Response({
-                'at_stop': {
-                    'place_id': str(place.id),
-                    'name': place.name,
-                    'announcement_text': announcement_text[:500] if announcement_text else '',
-                    'pickups': pickups,
-                    'dropoffs': dropoffs,
-                    'has_destination_booking': has_destination_booking,
-                },
-            }, status=status.HTTP_200_OK)
+            ).select_related(*booking_select)
+        )
+        # Scheduled tickets whose SeatBooking was created without a destination still belong to this stop.
+        route_end = None
+        if route is not None:
+            route_end = route.start_point if reverse else route.end_point
+        if trip.is_scheduled and trip.vehicle_schedule_id and trip.vehicle_id:
+            vehicle_seat_by_key = {(vs.side, vs.number): vs for vs in trip.vehicle.seats.all()}
+            unassigned = {
+                sb.vehicle_seat_id: sb
+                for sb in SeatBooking.objects.filter(
+                    trip=trip,
+                    destination_place_id__isnull=True,
+                    check_out_datetime__isnull=True,
+                ).select_related(*booking_select)
+            }
+            for vtb in trip.vehicle_schedule.ticket_bookings.all():
+                dest_id = vtb.destination_point_id or (route_end.id if route_end is not None else None)
+                if dest_id != place.id:
+                    continue
+                for seat_item in _seat_to_list(vtb.seat):
+                    side = str(seat_item.get('side', '')).strip()
+                    try:
+                        num = int(seat_item.get('number'))
+                    except (TypeError, ValueError):
+                        continue
+                    vs = vehicle_seat_by_key.get((side, num))
+                    if vs is None:
+                        continue
+                    sb = unassigned.pop(vs.id, None)
+                    if sb is None:
+                        continue
+                    sb.destination_place = place
+                    if not sb.origin_place_id and vtb.pickup_point_id:
+                        sb.origin_place = vtb.pickup_point
+                    sb.save(update_fields=['destination_place', 'origin_place', 'updated_at'])
+                    open_bookings.append(sb)
+
+        dropoffs = []
+        for sb in open_bookings:
+            seat_label = f"{sb.vehicle_seat.side}{sb.vehicle_seat.number}"
+            dropoffs.append({
+                'booking_id': str(sb.id),
+                'vehicle_seat_id': str(sb.vehicle_seat_id),
+                'seat_label': seat_label,
+                'name': (sb.user.name if sb.user else None) or 'Guest',
+                'pnr': '',
+                'trip_amount': str(sb.trip_amount) if sb.trip_amount is not None else '0',
+            })
+        checked_out_seat_ids = {
+            str(sid) for sid in SeatBooking.objects.filter(
+                trip=trip, check_out_datetime__isnull=False,
+            ).values_list('vehicle_seat_id', flat=True)
+        }
+        existing_seat_ids = {d['vehicle_seat_id'] for d in dropoffs}
+        if trip.is_scheduled and trip.vehicle_schedule_id and trip.vehicle_id:
+            vehicle_seat_by_key = {(vs.side, vs.number): vs for vs in trip.vehicle.seats.all()}
+            for vtb in trip.vehicle_schedule.ticket_bookings.all():
+                dest_id = vtb.destination_point_id or (route_end.id if route_end is not None else None)
+                if dest_id != place.id:
+                    continue
+                for seat_item in _seat_to_list(vtb.seat):
+                    side = str(seat_item.get('side', '')).strip()
+                    try:
+                        num = int(seat_item.get('number'))
+                    except (TypeError, ValueError):
+                        continue
+                    vs = vehicle_seat_by_key.get((side, num))
+                    if vs is None or str(vs.id) in existing_seat_ids or str(vs.id) in checked_out_seat_ids:
+                        continue
+                    existing_seat_ids.add(str(vs.id))
+                    dropoffs.append({
+                        'booking_id': f"ticket_{vtb.id}",
+                        'vehicle_seat_id': str(vs.id),
+                        'seat_label': f"{side}{num}",
+                        'name': vtb.name or 'Guest',
+                        'pnr': vtb.pnr or '',
+                        'trip_amount': str(vtb.price) if vtb.price is not None else '0',
+                    })
+
+        auto_released = False
+        # Free the seats only after the bus has crossed the stop, including
+        # when the pin is on the other side of the road.
+        if crossed and dropoffs:
+            from .seat_booking_views import release_booking_at_destination
+            for sb in open_bookings:
+                release_booking_at_destination(sb, place)
+            released_ids = {str(sb.vehicle_seat_id) for sb in open_bookings}
+            for item in dropoffs:
+                if item['vehicle_seat_id'] in released_ids:
+                    continue
+                VehicleSeat.objects.filter(pk=item['vehicle_seat_id'], status='booked').update(status='available')
+            auto_released = True
+
+        has_destination_booking = bool(dropoffs)
+        return Response({
+            'at_stop': {
+                'place_id': str(place.id),
+                'name': place.name,
+                'announcement_text': announcement_text[:500] if announcement_text else '',
+                'pickups': pickups,
+                'dropoffs': dropoffs,
+                'has_destination_booking': has_destination_booking,
+                'crossed': crossed,
+                'auto_released': auto_released,
+            },
+        }, status=status.HTTP_200_OK)
 
     return Response({'at_stop': None}, status=status.HTTP_200_OK)
