@@ -11,16 +11,21 @@ def create_wallet_transaction(
     remarks: str = None,
     status: str = 'success',
     card=None,
+    balance_before: Decimal = None,
+    balance_after: Decimal = None,
 ) -> Transaction:
     """
     Create a transaction record for a wallet balance change.
-    Does NOT modify wallet.balance; caller must update wallet and save.
+    If balance_before and balance_after are provided, uses them directly;
+    otherwise computes from wallet.balance (when called before wallet.save()).
     """
-    balance_before = wallet.balance
-    if type == 'add':
-        balance_after = balance_before + amount
-    else:
-        balance_after = balance_before - amount
+    if balance_before is None:
+        balance_before = wallet.balance
+    if balance_after is None:
+        if type == 'add':
+            balance_after = balance_before + amount
+        else:
+            balance_after = balance_before - amount
     return Transaction.objects.create(
         wallet=wallet,
         user=user,
@@ -32,3 +37,4 @@ def create_wallet_transaction(
         type=type,
         remarks=remarks or '',
     )
+

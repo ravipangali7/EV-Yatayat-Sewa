@@ -84,9 +84,10 @@ def wallet_list_post_view(request):
     """Create a new wallet"""
     # Extract data from request.POST or request.data
     user_id = request.POST.get('user') or request.data.get('user')
-    balance = request.POST.get('balance') or request.data.get('balance', '0')
-    to_pay = request.POST.get('to_pay') or request.data.get('to_pay', '0')
-    to_receive = request.POST.get('to_receive') or request.data.get('to_receive', '0')
+    balance = request.POST.get('balance') if 'balance' in request.POST else request.data.get('balance', '0')
+    to_pay = request.POST.get('to_pay') if 'to_pay' in request.POST else request.data.get('to_pay', '0')
+    to_receive = request.POST.get('to_receive') if 'to_receive' in request.POST else request.data.get('to_receive', '0')
+    remarks = (request.POST.get('remarks') or request.data.get('remarks') or '').strip()
     
     # Validate required fields
     if not user_id:
@@ -104,19 +105,30 @@ def wallet_list_post_view(request):
     
     # Convert to Decimal
     try:
-        balance = Decimal(str(balance))
-        to_pay = Decimal(str(to_pay))
-        to_receive = Decimal(str(to_receive))
+        balance = Decimal(str(balance if balance is not None else '0'))
+        to_pay = Decimal(str(to_pay if to_pay is not None else '0'))
+        to_receive = Decimal(str(to_receive if to_receive is not None else '0'))
     except (ValueError, TypeError):
         return Response({'error': 'Invalid decimal values'}, status=status.HTTP_400_BAD_REQUEST)
     
-    # Create wallet directly without serializer
-    wallet = Wallet.objects.create(
-        user=user,
-        balance=balance,
-        to_pay=to_pay,
-        to_receive=to_receive,
-    )
+    with db_transaction.atomic():
+        wallet = Wallet.objects.create(
+            user=user,
+            balance=balance,
+            to_pay=to_pay,
+            to_receive=to_receive,
+        )
+        if balance > 0:
+            create_wallet_transaction(
+                wallet=wallet,
+                user=user,
+                amount=balance,
+                type='add',
+                remarks=remarks or 'Initial wallet balance (Admin)',
+                status='success',
+                balance_before=Decimal('0.00'),
+                balance_after=balance,
+            )
     
     # Return response
     return Response({
@@ -170,43 +182,100 @@ def wallet_detail_get_view(request, pk):
 
 @api_view(['POST'])
 def wallet_detail_post_view(request, pk):
-    """Update/edit a wallet"""
-    try:
-        wallet = Wallet.objects.select_related('user').get(pk=pk)
-    except Wallet.DoesNotExist:
-        return Response({'error': 'Wallet not found'}, status=status.HTTP_404_NOT_FOUND)
-    
-    # Extract data from request.POST or request.data
-    if 'balance' in request.POST or 'balance' in request.data:
-        balance = request.POST.get('balance') or request.data.get('balance')
+    """Update/edit a wallet and record corresponding Transaction ledger entries."""
+    with db_transaction.atomic():
         try:
-            wallet.balance = Decimal(str(balance))
-        except (ValueError, TypeError):
-            return Response({'error': 'Invalid balance value'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    if 'to_pay' in request.POST or 'to_pay' in request.data:
-        to_pay = request.POST.get('to_pay') or request.data.get('to_pay')
-        try:
-            wallet.to_pay = Decimal(str(to_pay))
-        except (ValueError, TypeError):
-            return Response({'error': 'Invalid to_pay value'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    if 'to_receive' in request.POST or 'to_receive' in request.data:
-        to_receive = request.POST.get('to_receive') or request.data.get('to_receive')
-        try:
-            wallet.to_receive = Decimal(str(to_receive))
-        except (ValueError, TypeError):
-            return Response({'error': 'Invalid to_receive value'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    if 'user' in request.POST or 'user' in request.data:
-        user_id = request.POST.get('user') or request.data.get('user')
-        try:
-            user = User.objects.get(pk=user_id)
-            wallet.user = user
-        except User.DoesNotExist:
-            return Response({'error': 'User not found'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    wallet.save()
+            wallet = Wallet.objects.select_for_update().select_related('user').get(pk=pk)
+        except Wallet.DoesNotExist:
+            return Response({'error': 'Wallet not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        old_balance = wallet.balance
+        old_to_pay = wallet.to_pay
+        old_to_receive = wallet.to_receive
+        remarks = (request.POST.get('remarks') or request.data.get('remarks') or '').strip()
+
+        # Extract data from request.POST or request.data
+        if 'balance' in request.POST or 'balance' in request.data:
+            balance = request.POST.get('balance') if 'balance' in request.POST else request.data.get('balance')
+            try:
+                wallet.balance = Decimal(str(balance))
+            except (ValueError, TypeError):
+                return Response({'error': 'Invalid balance value'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if 'to_pay' in request.POST or 'to_pay' in request.data:
+            to_pay = request.POST.get('to_pay') if 'to_pay' in request.POST else request.data.get('to_pay')
+            try:
+                wallet.to_pay = Decimal(str(to_pay))
+            except (ValueError, TypeError):
+                return Response({'error': 'Invalid to_pay value'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if 'to_receive' in request.POST or 'to_receive' in request.data:
+            to_receive = request.POST.get('to_receive') if 'to_receive' in request.POST else request.data.get('to_receive')
+            try:
+                wallet.to_receive = Decimal(str(to_receive))
+            except (ValueError, TypeError):
+                return Response({'error': 'Invalid to_receive value'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if 'user' in request.POST or 'user' in request.data:
+            user_id = request.POST.get('user') or request.data.get('user')
+            try:
+                user = User.objects.get(pk=user_id)
+                wallet.user = user
+            except User.DoesNotExist:
+                return Response({'error': 'User not found'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        wallet.save()
+
+        if wallet.balance != old_balance:
+            delta = wallet.balance - old_balance
+            if delta > 0:
+                create_wallet_transaction(
+                    wallet=wallet,
+                    user=wallet.user,
+                    amount=delta,
+                    type='add',
+                    remarks=remarks or 'Admin wallet credit',
+                    status='success',
+                    balance_before=old_balance,
+                    balance_after=wallet.balance,
+                )
+            elif delta < 0:
+                create_wallet_transaction(
+                    wallet=wallet,
+                    user=wallet.user,
+                    amount=abs(delta),
+                    type='deducted',
+                    remarks=remarks or 'Admin wallet deduction',
+                    status='success',
+                    balance_before=old_balance,
+                    balance_after=wallet.balance,
+                )
+
+        if wallet.balance == old_balance and wallet.to_pay != old_to_pay:
+            due_delta = wallet.to_pay - old_to_pay
+            create_wallet_transaction(
+                wallet=wallet,
+                user=wallet.user,
+                amount=abs(due_delta),
+                type='add' if due_delta > 0 else 'deducted',
+                remarks=remarks or f'Admin due (to_pay) adjustment: Rs. {old_to_pay} -> Rs. {wallet.to_pay}',
+                status='success',
+                balance_before=old_balance,
+                balance_after=wallet.balance,
+            )
+
+        if wallet.balance == old_balance and wallet.to_receive != old_to_receive:
+            rec_delta = wallet.to_receive - old_to_receive
+            create_wallet_transaction(
+                wallet=wallet,
+                user=wallet.user,
+                amount=abs(rec_delta),
+                type='add' if rec_delta > 0 else 'deducted',
+                remarks=remarks or f'Admin receivable (to_receive) adjustment: Rs. {old_to_receive} -> Rs. {wallet.to_receive}',
+                status='success',
+                balance_before=old_balance,
+                balance_after=wallet.balance,
+            )
     
     # Return updated data
     return Response({
@@ -246,6 +315,7 @@ def wallet_my_deposit_view(request):
     """Deposit/recharge current user's wallet. Adds amount and creates an 'add' transaction."""
     data = request.data or request.POST
     amount = data.get('amount')
+    remarks = (data.get('remarks') or '').strip()
     if amount is None:
         return Response({'error': 'amount is required'}, status=status.HTTP_400_BAD_REQUEST)
     try:
@@ -254,20 +324,24 @@ def wallet_my_deposit_view(request):
         return Response({'error': 'Invalid amount'}, status=status.HTTP_400_BAD_REQUEST)
     if amount <= 0:
         return Response({'error': 'Amount must be positive'}, status=status.HTTP_400_BAD_REQUEST)
-    try:
-        wallet = Wallet.objects.get(user=request.user)
-    except Wallet.DoesNotExist:
-        return Response({'error': 'Wallet not found'}, status=status.HTTP_400_BAD_REQUEST)
-    wallet.balance += amount
-    wallet.save(update_fields=['balance', 'updated_at'])
-    create_wallet_transaction(
-        wallet=wallet,
-        user=request.user,
-        amount=amount,
-        type='add',
-        remarks='Deposit',
-        status='success',
-    )
+    with db_transaction.atomic():
+        try:
+            wallet = Wallet.objects.select_for_update().get(user=request.user)
+        except Wallet.DoesNotExist:
+            return Response({'error': 'Wallet not found'}, status=status.HTTP_400_BAD_REQUEST)
+        balance_before = wallet.balance
+        wallet.balance += amount
+        wallet.save(update_fields=['balance', 'updated_at'])
+        create_wallet_transaction(
+            wallet=wallet,
+            user=request.user,
+            amount=amount,
+            type='add',
+            remarks=remarks or 'Deposit',
+            status='success',
+            balance_before=balance_before,
+            balance_after=wallet.balance,
+        )
     return Response({
         'id': str(wallet.id),
         'balance': str(wallet.balance),
@@ -317,23 +391,32 @@ def wallet_my_transfer_view(request):
     if recipient.id == request.user.id:
         return Response({'error': 'Cannot transfer to yourself'}, status=status.HTTP_400_BAD_REQUEST)
 
-    try:
-        sender_wallet = Wallet.objects.get(user=request.user)
-    except Wallet.DoesNotExist:
-        return Response({'error': 'Wallet not found'}, status=status.HTTP_400_BAD_REQUEST)
+    with db_transaction.atomic():
+        try:
+            sender_wallet = Wallet.objects.select_for_update().get(user=request.user)
+        except Wallet.DoesNotExist:
+            return Response({'error': 'Wallet not found'}, status=status.HTTP_400_BAD_REQUEST)
 
-    if sender_wallet.balance < amount:
-        return Response(
-            {'error': 'Insufficient balance', 'balance': str(sender_wallet.balance)},
-            status=status.HTTP_400_BAD_REQUEST,
+        if sender_wallet.balance < amount:
+            return Response(
+                {'error': 'Insufficient balance', 'balance': str(sender_wallet.balance)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        recipient_wallet, _ = Wallet.objects.select_for_update().get_or_create(
+            user=recipient,
+            defaults={'balance': 0, 'to_pay': 0, 'to_receive': 0},
         )
 
-    recipient_wallet, _ = Wallet.objects.get_or_create(
-        user=recipient,
-        defaults={'balance': 0, 'to_pay': 0, 'to_receive': 0},
-    )
+        sender_before = sender_wallet.balance
+        recipient_before = recipient_wallet.balance
 
-    with db_transaction.atomic():
+        sender_wallet.balance -= amount
+        sender_wallet.save(update_fields=['balance', 'updated_at'])
+
+        recipient_wallet.balance += amount
+        recipient_wallet.save(update_fields=['balance', 'updated_at'])
+
         create_wallet_transaction(
             wallet=sender_wallet,
             user=request.user,
@@ -341,6 +424,8 @@ def wallet_my_transfer_view(request):
             type='deducted',
             remarks=f'Transfer to {recipient.name or recipient.phone}',
             status='success',
+            balance_before=sender_before,
+            balance_after=sender_wallet.balance,
         )
         create_wallet_transaction(
             wallet=recipient_wallet,
@@ -349,17 +434,9 @@ def wallet_my_transfer_view(request):
             type='add',
             remarks=f'Transfer from {request.user.name or request.user.phone}',
             status='success',
+            balance_before=recipient_before,
+            balance_after=recipient_wallet.balance,
         )
-        Wallet.objects.filter(pk=sender_wallet.pk).update(
-            balance=F('balance') - amount,
-            updated_at=timezone.now(),
-        )
-        Wallet.objects.filter(pk=recipient_wallet.pk).update(
-            balance=F('balance') + amount,
-            updated_at=timezone.now(),
-        )
-        sender_wallet.refresh_from_db()
-        recipient_wallet.refresh_from_db()
 
     return Response({
         'message': 'Transfer successful',
@@ -367,3 +444,4 @@ def wallet_my_transfer_view(request):
         'recipient_name': recipient.name or recipient.phone,
         'recipient_phone': recipient.phone,
     })
+

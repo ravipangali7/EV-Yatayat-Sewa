@@ -323,35 +323,40 @@ def vehicle_ticket_booking_list_post_view(request):
 @permission_classes([IsAuthenticated])
 def vehicle_ticket_booking_pay_view(request, pk):
     """Pay for a booking from wallet. Creates deducted transaction; if dealer, adds commission."""
-    try:
-        b = VehicleTicketBooking.objects.select_related('vehicle_schedule').get(pk=pk)
-    except VehicleTicketBooking.DoesNotExist:
-        return Response({'error': 'Vehicle ticket booking not found'}, status=status.HTTP_404_NOT_FOUND)
-    if b.is_paid:
-        return Response({'error': 'Booking is already paid'}, status=status.HTTP_400_BAD_REQUEST)
-    try:
-        wallet = Wallet.objects.get(user=request.user)
-    except Wallet.DoesNotExist:
-        return Response(
-            {'error': 'Wallet not found', 'code': 'no_wallet'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    amount = b.price
-    if wallet.balance < amount:
-        return Response(
-            {'error': 'Insufficient wallet balance. Please recharge.', 'code': 'insufficient_balance'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    commission = Decimal('0')
-    if getattr(request.user, 'is_ticket_dealer', False) and getattr(request.user, 'ticket_commission', None):
-        try:
-            commission = amount * (request.user.ticket_commission / Decimal('100'))
-        except (TypeError, ValueError):
-            pass
-    seat_remarks = _format_seat_remarks(b.seat)
-    seat_suffix = f' | Seat(s): {seat_remarks}' if seat_remarks else ''
-
     with db_transaction.atomic():
+        try:
+            b = VehicleTicketBooking.objects.select_for_update().select_related(
+                'vehicle_schedule', 'vehicle_schedule__vehicle', 'vehicle_schedule__route',
+                'vehicle_schedule__route__start_point', 'vehicle_schedule__route__end_point',
+                'pickup_point', 'destination_point',
+            ).get(pk=pk)
+        except VehicleTicketBooking.DoesNotExist:
+            return Response({'error': 'Vehicle ticket booking not found'}, status=status.HTTP_404_NOT_FOUND)
+        if b.is_paid:
+            return Response({'error': 'Booking is already paid'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            wallet = Wallet.objects.select_for_update().get(user=request.user)
+        except Wallet.DoesNotExist:
+            return Response(
+                {'error': 'Wallet not found', 'code': 'no_wallet'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        amount = b.price
+        if wallet.balance < amount:
+            return Response(
+                {'error': 'Insufficient wallet balance. Please recharge.', 'code': 'insufficient_balance'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        commission = Decimal('0')
+        if getattr(request.user, 'is_ticket_dealer', False) and getattr(request.user, 'ticket_commission', None):
+            try:
+                commission = amount * (request.user.ticket_commission / Decimal('100'))
+            except (TypeError, ValueError):
+                pass
+        seat_remarks = _format_seat_remarks(b.seat)
+        seat_suffix = f' | Seat(s): {seat_remarks}' if seat_remarks else ''
+
+        balance_before = wallet.balance
         wallet.balance -= amount
         wallet.save(update_fields=['balance', 'updated_at'])
         create_wallet_transaction(
@@ -361,10 +366,13 @@ def vehicle_ticket_booking_pay_view(request, pk):
             type='deducted',
             remarks=f'Ticket payment {b.pnr}{seat_suffix}',
             status='success',
+            balance_before=balance_before,
+            balance_after=wallet.balance,
         )
         b.is_paid = True
         b.save(update_fields=['is_paid', 'updated_at'])
         if commission > 0:
+            comm_before = wallet.balance
             wallet.balance += commission
             wallet.save(update_fields=['balance', 'updated_at'])
             create_wallet_transaction(
@@ -374,8 +382,11 @@ def vehicle_ticket_booking_pay_view(request, pk):
                 type='add',
                 remarks=f'Commission for {b.pnr}{seat_suffix}',
                 status='success',
+                balance_before=comm_before,
+                balance_after=wallet.balance,
             )
     return Response(_ticket_booking_to_response(b, include_schedule_details=True))
+
 
 
 @api_view(['GET'])

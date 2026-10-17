@@ -580,6 +580,8 @@ def trip_detail_get_view(request, pk):
     route = trip.route
     if route:
         reverse = getattr(trip, 'reverse_direction', False)
+        start_place = route.end_point if reverse else route.start_point
+        end_place = route.start_point if reverse else route.end_point
         points = get_route_ordered_points(route, reverse)
         try:
             header = (getattr(SuperSetting.objects.latest('created_at'), 'stop_point_announcement_header', None) or '').strip()
@@ -600,23 +602,48 @@ def trip_detail_get_view(request, pk):
                 if terminus is not None:
                     open_dest_ids.add(terminus.id)
         stop_points = []
+        ordered_points = []
         for order_idx, (kind, place, rsp) in enumerate(points):
+            if place is None:
+                continue
             announcement_text = _announcement_text_for_stop(place, rsp, header)
             has_destination_booking = place.id in open_dest_ids
+            lat_str = str(place.latitude) if place.latitude is not None else None
+            lng_str = str(place.longitude) if place.longitude is not None else None
             stop_points.append({
+                'kind': kind,
+                'place': str(place.id),
                 'place_id': str(place.id),
                 'order': order_idx,
                 'announcement_text': announcement_text,
-                'place_name': place.name if place else None,
-                'place_code': place.code if place else None,
-                'latitude': str(place.latitude) if place and place.latitude is not None else None,
-                'longitude': str(place.longitude) if place and place.longitude is not None else None,
+                'place_name': place.name,
+                'place_code': place.code,
+                'latitude': lat_str,
+                'longitude': lng_str,
                 'has_destination_booking': has_destination_booking,
+            })
+            ordered_points.append({
+                'kind': kind,
+                'order': order_idx,
+                'place_id': str(place.id),
+                'name': place.name,
+                'latitude': lat_str,
+                'longitude': lng_str,
             })
         data['route'] = {
             'id': str(route.id),
             'name': route.name,
+            'is_bidirectional': getattr(route, 'is_bidirectional', False),
+            'start_point': str(start_place.id) if start_place else None,
+            'start_point_name': start_place.name if start_place else None,
+            'start_point_lat': str(start_place.latitude) if start_place and start_place.latitude is not None else None,
+            'start_point_lng': str(start_place.longitude) if start_place and start_place.longitude is not None else None,
+            'end_point': str(end_place.id) if end_place else None,
+            'end_point_name': end_place.name if end_place else None,
+            'end_point_lat': str(end_place.latitude) if end_place and end_place.latitude is not None else None,
+            'end_point_lng': str(end_place.longitude) if end_place and end_place.longitude is not None else None,
             'stop_points': stop_points,
+            'ordered_points': ordered_points,
         }
     else:
         data['route'] = None

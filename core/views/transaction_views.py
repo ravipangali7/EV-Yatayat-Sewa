@@ -2,8 +2,10 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 from django.db.models import Q
+from django.db import transaction as db_transaction
 from decimal import Decimal
 from ..models import Transaction, Wallet, User
+
 
 
 def _transaction_to_response(transaction):
@@ -159,25 +161,20 @@ def transaction_list_post_view(request):
     user_id = request.POST.get('user') or data.get('user')
     card_id = request.POST.get('card') or data.get('card')
     status_val = request.POST.get('status') or data.get('status', 'pending')
-    balance_before = request.POST.get('balance_before') or data.get('balance_before')
-    balance_after = request.POST.get('balance_after') or data.get('balance_after')
-    amount = request.POST.get('amount') or data.get('amount')
+    raw_balance_before = request.POST.get('balance_before') if 'balance_before' in request.POST else data.get('balance_before')
+    raw_balance_after = request.POST.get('balance_after') if 'balance_after' in request.POST else data.get('balance_after')
+    amount = request.POST.get('amount') if 'amount' in request.POST else data.get('amount')
     type_val = request.POST.get('type') or data.get('type')
-    remarks = request.POST.get('remarks') or data.get('remarks') or None
+    remarks = (request.POST.get('remarks') or data.get('remarks') or '').strip()
     
     if not wallet_id:
         return Response({'error': 'Wallet is required'}, status=status.HTTP_400_BAD_REQUEST)
     if not user_id:
         return Response({'error': 'User is required'}, status=status.HTTP_400_BAD_REQUEST)
-    if not amount:
+    if amount is None or amount == '':
         return Response({'error': 'Amount is required'}, status=status.HTTP_400_BAD_REQUEST)
     if not type_val:
         return Response({'error': 'Type is required'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    try:
-        wallet = Wallet.objects.get(pk=wallet_id)
-    except Wallet.DoesNotExist:
-        return Response({'error': 'Wallet not found'}, status=status.HTTP_400_BAD_REQUEST)
     
     try:
         user = User.objects.get(pk=user_id)
@@ -200,28 +197,43 @@ def transaction_list_post_view(request):
     
     try:
         amount = Decimal(str(amount))
-        if balance_before:
-            balance_before = Decimal(str(balance_before))
-        else:
-            balance_before = wallet.balance
-        if balance_after:
-            balance_after = Decimal(str(balance_after))
-        else:
-            balance_after = wallet.balance
     except (ValueError, TypeError):
         return Response({'error': 'Invalid decimal values'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    transaction = Transaction.objects.create(
-        wallet=wallet,
-        user=user,
-        card=card,
-        status=status_val,
-        balance_before=balance_before,
-        balance_after=balance_after,
-        amount=amount,
-        type=type_val,
-        remarks=remarks,
-    )
+
+    default_remarks = 'Admin wallet credit' if type_val == 'add' else 'Admin wallet deduction'
+    with db_transaction.atomic():
+        try:
+            wallet = Wallet.objects.select_for_update().select_related('user').get(pk=wallet_id)
+        except Wallet.DoesNotExist:
+            return Response({'error': 'Wallet not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+        actual_before = wallet.balance
+        if status_val == 'success':
+            if type_val == 'add':
+                wallet.balance = actual_before + amount
+            else:
+                wallet.balance = actual_before - amount
+            wallet.save(update_fields=['balance', 'updated_at'])
+            balance_before = actual_before
+            balance_after = wallet.balance
+        else:
+            try:
+                balance_before = Decimal(str(raw_balance_before)) if raw_balance_before not in (None, '') else actual_before
+                balance_after = Decimal(str(raw_balance_after)) if raw_balance_after not in (None, '') else actual_before
+            except (ValueError, TypeError):
+                return Response({'error': 'Invalid decimal values'}, status=status.HTTP_400_BAD_REQUEST)
+
+        transaction = Transaction.objects.create(
+            wallet=wallet,
+            user=user,
+            card=card,
+            status=status_val,
+            balance_before=balance_before,
+            balance_after=balance_after,
+            amount=amount,
+            type=type_val,
+            remarks=remarks or default_remarks,
+        )
     return Response(_transaction_to_response(transaction), status=status.HTTP_201_CREATED)
 
 
@@ -239,78 +251,103 @@ def transaction_detail_get_view(request, pk):
 def transaction_detail_post_view(request, pk):
     """Update/edit a transaction"""
     from ..models import Card
-    try:
-        transaction = Transaction.objects.select_related('wallet', 'user', 'card').get(pk=pk)
-    except Transaction.DoesNotExist:
-        return Response({'error': 'Transaction not found'}, status=status.HTTP_404_NOT_FOUND)
-    data = request.data or request.POST
-    if 'status' in request.POST or 'status' in data:
-        status_val = request.POST.get('status') or data.get('status')
-        valid_statuses = ['pending', 'success', 'failed']
-        if status_val not in valid_statuses:
-            return Response({'error': f'Invalid status. Must be one of: {", ".join(valid_statuses)}'}, status=status.HTTP_400_BAD_REQUEST)
-        transaction.status = status_val
-    
-    if 'balance_before' in request.POST or 'balance_before' in data:
-        balance_before = request.POST.get('balance_before') or data.get('balance_before')
+    with db_transaction.atomic():
         try:
-            transaction.balance_before = Decimal(str(balance_before))
-        except (ValueError, TypeError):
-            return Response({'error': 'Invalid balance_before value'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    if 'balance_after' in request.POST or 'balance_after' in data:
-        balance_after = request.POST.get('balance_after') or data.get('balance_after')
-        try:
-            transaction.balance_after = Decimal(str(balance_after))
-        except (ValueError, TypeError):
-            return Response({'error': 'Invalid balance_after value'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    if 'amount' in request.POST or 'amount' in data:
-        amount = request.POST.get('amount') or data.get('amount')
-        try:
-            transaction.amount = Decimal(str(amount))
-        except (ValueError, TypeError):
-            return Response({'error': 'Invalid amount value'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    if 'type' in request.POST or 'type' in data:
-        type_val = request.POST.get('type') or data.get('type')
-        valid_types = ['add', 'deducted']
-        if type_val not in valid_types:
-            return Response({'error': f'Invalid type. Must be one of: {", ".join(valid_types)}'}, status=status.HTTP_400_BAD_REQUEST)
-        transaction.type = type_val
-    
-    if 'remarks' in request.POST or 'remarks' in data:
-        remarks = request.POST.get('remarks') or data.get('remarks')
-        transaction.remarks = remarks if remarks else None
-    
-    if 'card' in request.POST or 'card' in data:
-        card_id = request.POST.get('card') or data.get('card')
-        if card_id:
+            transaction = Transaction.objects.select_for_update().select_related('wallet', 'user', 'card').get(pk=pk)
+        except Transaction.DoesNotExist:
+            return Response({'error': 'Transaction not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        old_status = transaction.status
+        data = request.data or request.POST
+
+        if 'status' in request.POST or 'status' in data:
+            status_val = request.POST.get('status') or data.get('status')
+            valid_statuses = ['pending', 'success', 'failed']
+            if status_val not in valid_statuses:
+                return Response({'error': f'Invalid status. Must be one of: {", ".join(valid_statuses)}'}, status=status.HTTP_400_BAD_REQUEST)
+            transaction.status = status_val
+        
+        if 'balance_before' in request.POST or 'balance_before' in data:
+            balance_before = request.POST.get('balance_before') if 'balance_before' in request.POST else data.get('balance_before')
             try:
-                transaction.card = Card.objects.get(pk=card_id)
-            except Card.DoesNotExist:
-                return Response({'error': 'Card not found'}, status=status.HTTP_400_BAD_REQUEST)
-        else:
-            transaction.card = None
-    
-    if 'wallet' in request.POST or 'wallet' in data:
-        wallet_id = request.POST.get('wallet') or data.get('wallet')
-        try:
-            wallet = Wallet.objects.get(pk=wallet_id)
+                transaction.balance_before = Decimal(str(balance_before))
+            except (ValueError, TypeError):
+                return Response({'error': 'Invalid balance_before value'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if 'balance_after' in request.POST or 'balance_after' in data:
+            balance_after = request.POST.get('balance_after') if 'balance_after' in request.POST else data.get('balance_after')
+            try:
+                transaction.balance_after = Decimal(str(balance_after))
+            except (ValueError, TypeError):
+                return Response({'error': 'Invalid balance_after value'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if 'amount' in request.POST or 'amount' in data:
+            amount = request.POST.get('amount') if 'amount' in request.POST else data.get('amount')
+            try:
+                transaction.amount = Decimal(str(amount))
+            except (ValueError, TypeError):
+                return Response({'error': 'Invalid amount value'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if 'type' in request.POST or 'type' in data:
+            type_val = request.POST.get('type') or data.get('type')
+            valid_types = ['add', 'deducted']
+            if type_val not in valid_types:
+                return Response({'error': f'Invalid type. Must be one of: {", ".join(valid_types)}'}, status=status.HTTP_400_BAD_REQUEST)
+            transaction.type = type_val
+        
+        if 'remarks' in request.POST or 'remarks' in data:
+            remarks = request.POST.get('remarks') if 'remarks' in request.POST else data.get('remarks')
+            transaction.remarks = remarks if remarks else None
+        
+        if 'card' in request.POST or 'card' in data:
+            card_id = request.POST.get('card') or data.get('card')
+            if card_id:
+                try:
+                    transaction.card = Card.objects.get(pk=card_id)
+                except Card.DoesNotExist:
+                    return Response({'error': 'Card not found'}, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                transaction.card = None
+        
+        if 'wallet' in request.POST or 'wallet' in data:
+            wallet_id = request.POST.get('wallet') or data.get('wallet')
+            try:
+                wallet = Wallet.objects.select_for_update().select_related('user').get(pk=wallet_id)
+                transaction.wallet = wallet
+            except Wallet.DoesNotExist:
+                return Response({'error': 'Wallet not found'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if 'user' in request.POST or 'user' in data:
+            user_id = request.POST.get('user') or data.get('user')
+            try:
+                user = User.objects.get(pk=user_id)
+                transaction.user = user
+            except User.DoesNotExist:
+                return Response({'error': 'User not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Apply or reverse wallet balance effect when status transitions
+        if old_status != transaction.status:
+            wallet = Wallet.objects.select_for_update().select_related('user').get(pk=transaction.wallet_id)
+            if old_status in ('pending', 'failed') and transaction.status == 'success':
+                actual_before = wallet.balance
+                if transaction.type == 'add':
+                    wallet.balance = actual_before + transaction.amount
+                else:
+                    wallet.balance = actual_before - transaction.amount
+                wallet.save(update_fields=['balance', 'updated_at'])
+                transaction.balance_before = actual_before
+                transaction.balance_after = wallet.balance
+            elif old_status == 'success' and transaction.status in ('failed', 'pending'):
+                if transaction.type == 'add':
+                    wallet.balance -= transaction.amount
+                else:
+                    wallet.balance += transaction.amount
+                wallet.save(update_fields=['balance', 'updated_at'])
             transaction.wallet = wallet
-        except Wallet.DoesNotExist:
-            return Response({'error': 'Wallet not found'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    if 'user' in request.POST or 'user' in data:
-        user_id = request.POST.get('user') or data.get('user')
-        try:
-            user = User.objects.get(pk=user_id)
-            transaction.user = user
-        except User.DoesNotExist:
-            return Response({'error': 'User not found'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    transaction.save()
+
+        transaction.save()
     return Response(_transaction_to_response(transaction))
+
 
 
 @api_view(['GET'])

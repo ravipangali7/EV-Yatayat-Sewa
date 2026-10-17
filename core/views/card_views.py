@@ -182,7 +182,7 @@ def card_search_by_number_view(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def card_topup_view(request, pk):
-    """Topup card from current user's wallet. Deducts wallet, adds to card, creates both transactions."""
+    """Topup card from current user's wallet. Deducts wallet, adds to card, creates a single transaction with both wallet and card."""
     amount = request.data.get('amount') if request.data else request.POST.get('amount')
     if amount is None:
         return Response({'error': 'amount is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -192,22 +192,25 @@ def card_topup_view(request, pk):
         return Response({'error': 'Invalid amount'}, status=status.HTTP_400_BAD_REQUEST)
     if amount <= 0:
         return Response({'error': 'Amount must be positive'}, status=status.HTTP_400_BAD_REQUEST)
-    try:
-        card = Card.objects.get(pk=pk, is_active=True)
-    except Card.DoesNotExist:
-        return Response({'error': 'Card not found'}, status=status.HTTP_404_NOT_FOUND)
-    try:
-        wallet = Wallet.objects.get(user=request.user)
-    except Wallet.DoesNotExist:
-        return Response({'error': 'Wallet not found'}, status=status.HTTP_400_BAD_REQUEST)
-    if wallet.balance < amount:
-        return Response(
-            {'error': 'Insufficient wallet balance', 'code': 'insufficient_balance'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
     with db_transaction.atomic():
+        try:
+            card = Card.objects.select_for_update().select_related('user').get(pk=pk, is_active=True)
+        except Card.DoesNotExist:
+            return Response({'error': 'Card not found'}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            wallet = Wallet.objects.select_for_update().get(user=request.user)
+        except Wallet.DoesNotExist:
+            return Response({'error': 'Wallet not found'}, status=status.HTTP_400_BAD_REQUEST)
+        if wallet.balance < amount:
+            return Response(
+                {'error': 'Insufficient wallet balance', 'code': 'insufficient_balance'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        balance_before = wallet.balance
         wallet.balance -= amount
         wallet.save(update_fields=['balance', 'updated_at'])
+        card.balance += amount
+        card.save(update_fields=['balance', 'updated_at'])
         create_wallet_transaction(
             wallet=wallet,
             user=request.user,
@@ -215,20 +218,9 @@ def card_topup_view(request, pk):
             type='deducted',
             remarks=f'Card topup {card.card_number}',
             status='success',
-        )
-        card.balance += amount
-        card.save(update_fields=['balance', 'updated_at'])
-        # Record card-side transaction (wallet already deducted; this is for card history)
-        Transaction.objects.create(
-            wallet=wallet,
-            user=request.user,
             card=card,
-            status='success',
-            balance_before=wallet.balance,
+            balance_before=balance_before,
             balance_after=wallet.balance,
-            amount=amount,
-            type='deducted',
-            remarks=f'Card topup {card.card_number}',
         )
-    card.refresh_from_db()
     return Response(_card_to_response(card))
+

@@ -4,7 +4,9 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Q, Subquery, OuterRef, Exists
+from django.db import transaction as db_transaction
 from decimal import Decimal
+
 import json
 from datetime import datetime
 from ..models import Vehicle, VehicleSeat, VehicleImage, Route, Trip, Location, SeatBooking
@@ -1033,19 +1035,49 @@ def vehicle_detail_post_view(request, pk):
         if isinstance(seats_data, str):
             try:
                 seats_data = json.loads(seats_data)
-            except:
+            except Exception:
                 seats_data = None
-        if seats_data is not None:
-            # Delete existing seats
-            VehicleSeat.objects.filter(vehicle=vehicle).delete()
-            # Create new seats
-            for seat_data in seats_data:
-                VehicleSeat.objects.create(
-                    vehicle=vehicle,
-                    side=seat_data.get('side'),
-                    number=seat_data.get('number'),
-                    status=seat_data.get('status', 'available')
-                )
+        if seats_data is not None and isinstance(seats_data, list):
+            with db_transaction.atomic():
+                existing_seats = {
+                    (s.side, int(s.number)): s
+                    for s in VehicleSeat.objects.select_for_update().filter(vehicle=vehicle)
+                }
+                seen_keys = set()
+                for seat_data in seats_data:
+                    if not isinstance(seat_data, dict):
+                        continue
+                    side = str(seat_data.get('side', 'A') or 'A').strip().upper()
+                    if side not in ('A', 'B', 'C'):
+                        side = 'A'
+                    try:
+                        number = int(seat_data.get('number', 1))
+                    except (ValueError, TypeError):
+                        number = 1
+                    new_status = str(seat_data.get('status', 'available') or 'available').strip().lower()
+                    if new_status not in ('available', 'booked'):
+                        new_status = 'available'
+                    key = (side, number)
+                    if key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+                    if key in existing_seats:
+                        seat_obj = existing_seats[key]
+                        if seat_obj.status != new_status:
+                            seat_obj.status = new_status
+                            seat_obj.save(update_fields=['status', 'updated_at'])
+                    else:
+                        VehicleSeat.objects.create(
+                            vehicle=vehicle,
+                            side=side,
+                            number=number,
+                            status=new_status,
+                        )
+                for key, seat_obj in existing_seats.items():
+                    if key not in seen_keys:
+                        if not seat_obj.bookings.exists():
+                            seat_obj.delete()
+
     
     if images_data is not None:
         if isinstance(images_data, str):

@@ -10,10 +10,26 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.conf import settings
 
-from ..models import PaymentTransaction, Wallet, User, Card
+from ..models import PaymentTransaction, Wallet, User, Card, Transaction
 from ..services.wallet_transaction import create_wallet_transaction
 from ..services import nepalpay_gateway_qr
 from booking.models import VehicleTicketBooking
+
+
+STATUS_PENDING = 'pending'
+STATUS_SUCCESS = 'success'
+STATUS_FAILED = 'failed'
+
+
+def _mark_pending_wallet_tx_failed(user, reference_id):
+    """If a pending wallet Transaction exists for this QR payment reference, mark it failed."""
+    if not reference_id:
+        return
+    Transaction.objects.filter(
+        user=user,
+        status=STATUS_PENDING,
+        remarks__icontains=f"ref {reference_id}",
+    ).update(status=STATUS_FAILED, updated_at=timezone.now())
 
 
 def _format_seat_remarks(seat_field):
@@ -143,12 +159,40 @@ def payment_initiate_view(request):
         user=request.user,
         amount=amount,
         amount_paisa=amount_paisa,
-        status='pending',
+        status=STATUS_PENDING,
         reference_id=reference_id,
         purpose=purpose,
         card=card,
         vehicle_ticket_booking=booking,
     )
+
+    pending_wallet_tx = None
+    if purpose in (PURPOSE_WALLET_DEPOSIT, PURPOSE_CARD_TOPUP, PURPOSE_PAY_DUE):
+        wallet_obj, _ = Wallet.objects.get_or_create(
+            user=request.user,
+            defaults={'balance': Decimal('0.00'), 'to_pay': Decimal('0.00'), 'to_receive': Decimal('0.00')},
+        )
+        if purpose == PURPOSE_WALLET_DEPOSIT:
+            purpose_label = 'Wallet deposit'
+            tx_type = 'add'
+        elif purpose == PURPOSE_CARD_TOPUP:
+            purpose_label = f"Card topup {card.card_number}" if card else 'Card topup'
+            tx_type = 'deducted'
+        else:
+            purpose_label = 'Pay due'
+            tx_type = 'deducted'
+        pending_wallet_tx = Transaction.objects.create(
+            wallet=wallet_obj,
+            user=request.user,
+            card=card,
+            status=STATUS_PENDING,
+            balance_before=wallet_obj.balance,
+            balance_after=wallet_obj.balance,
+            amount=amount,
+            type=tx_type,
+            remarks=f"{purpose_label} via QR (ref {reference_id})",
+        )
+
     try:
         qr = nepalpay_gateway_qr.generate_dynamic_qr(
             bill_number=reference_id,
@@ -157,9 +201,12 @@ def payment_initiate_view(request):
             reference_label=reference_id,
         )
     except Exception as e:
-        pt.status = 'failed'
+        pt.status = STATUS_FAILED
         pt.error_message = str(e)
         pt.save(update_fields=['status', 'error_message', 'updated_at'])
+        if pending_wallet_tx is not None:
+            pending_wallet_tx.status = STATUS_FAILED
+            pending_wallet_tx.save(update_fields=['status', 'updated_at'])
         return Response(
             {'error': 'Failed to generate payment QR', 'detail': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -208,9 +255,10 @@ def payment_validate_view(request):
         return Response({'error': 'Payment transaction not found'}, status=status.HTTP_404_NOT_FOUND)
     if pt.user_id != request.user.id and not request.user.is_superuser:
         return Response({'error': 'Not your payment'}, status=status.HTTP_403_FORBIDDEN)
-    if pt.status == 'success':
+    if pt.status == STATUS_SUCCESS:
         return Response(_payment_transaction_to_response(pt))
-    if pt.status == 'failed':
+    if pt.status == STATUS_FAILED:
+        _mark_pending_wallet_tx_failed(pt.user, pt.reference_id)
         return Response(
             _payment_transaction_to_response(pt),
             status=status.HTTP_400_BAD_REQUEST,
@@ -239,23 +287,120 @@ def _credit_paid_payment(pt, batch_id=''):
         locked = PaymentTransaction.objects.select_for_update().select_related(
             'user', 'card', 'vehicle_ticket_booking'
         ).get(pk=pt.pk)
-        if locked.status == 'success':
+        if locked.status == STATUS_SUCCESS:
             return locked
+
+        wallet, _ = Wallet.objects.select_for_update().get_or_create(
+            user=locked.user,
+            defaults={'balance': Decimal('0.00'), 'to_pay': Decimal('0.00'), 'to_receive': Decimal('0.00')},
+        )
+        amount = locked.amount
+        pt = locked
+
+        existing_tx = (
+            Transaction.objects.select_for_update()
+            .filter(wallet=wallet, remarks__icontains=f"ref {locked.reference_id}")
+            .order_by('-created_at')
+            .first()
+        )
+
+        if pt.purpose == PURPOSE_CARD_TOPUP and not pt.card_id:
+            locked.status = STATUS_FAILED
+            locked.error_message = 'Card not found for card_topup'
+            locked.save(update_fields=['status', 'error_message', 'updated_at'])
+            if existing_tx:
+                existing_tx.status = STATUS_FAILED
+                existing_tx.save(update_fields=['status', 'updated_at'])
+            return locked
+
         locked.connectips_batch_id = batch_id or locked.connectips_batch_id
-        locked.status = 'success'
+        locked.status = STATUS_SUCCESS
         locked.completed_at = timezone.now()
         locked.error_message = ''
         locked.save(update_fields=[
             'connectips_batch_id', 'status', 'completed_at', 'error_message', 'updated_at',
         ])
 
-        wallet, _ = Wallet.objects.get_or_create(user=locked.user, defaults={'balance': 0, 'to_pay': 0, 'to_receive': 0})
-        amount = locked.amount
-        pt = locked
         if pt.purpose == PURPOSE_PAY_DUE:
-            wallet.to_pay = max(Decimal('0'), wallet.to_pay - amount)
+            balance_before = wallet.balance
+            wallet.to_pay = max(Decimal('0.00'), wallet.to_pay - amount)
             wallet.save(update_fields=['to_pay', 'updated_at'])
-        else:
+            remarks_str = f"Pay due via QR (ref {locked.reference_id})"
+            if existing_tx:
+                existing_tx.status = STATUS_SUCCESS
+                existing_tx.type = 'deducted'
+                existing_tx.amount = amount
+                existing_tx.balance_before = balance_before
+                existing_tx.balance_after = wallet.balance
+                existing_tx.remarks = remarks_str
+                existing_tx.save(update_fields=['status', 'type', 'amount', 'balance_before', 'balance_after', 'remarks', 'updated_at'])
+            else:
+                create_wallet_transaction(
+                    wallet=wallet,
+                    user=pt.user,
+                    amount=amount,
+                    type='deducted',
+                    remarks=remarks_str,
+                    status=STATUS_SUCCESS,
+                    balance_before=balance_before,
+                    balance_after=wallet.balance,
+                )
+
+        elif pt.purpose == PURPOSE_WALLET_DEPOSIT:
+            balance_before = wallet.balance
+            wallet.balance += amount
+            wallet.save(update_fields=['balance', 'updated_at'])
+            remarks_str = f"Wallet deposit via QR (ref {locked.reference_id})"
+            if existing_tx:
+                existing_tx.status = STATUS_SUCCESS
+                existing_tx.type = 'add'
+                existing_tx.amount = amount
+                existing_tx.balance_before = balance_before
+                existing_tx.balance_after = wallet.balance
+                existing_tx.remarks = remarks_str
+                existing_tx.save(update_fields=['status', 'type', 'amount', 'balance_before', 'balance_after', 'remarks', 'updated_at'])
+            else:
+                create_wallet_transaction(
+                    wallet=wallet,
+                    user=pt.user,
+                    amount=amount,
+                    type='add',
+                    remarks=remarks_str,
+                    status=STATUS_SUCCESS,
+                    balance_before=balance_before,
+                    balance_after=wallet.balance,
+                )
+
+        elif pt.purpose == PURPOSE_CARD_TOPUP and pt.card_id:
+            card = Card.objects.select_for_update().get(pk=pt.card_id)
+            balance_before = wallet.balance
+            card.balance += amount
+            card.save(update_fields=['balance', 'updated_at'])
+            remarks_str = f"Card topup via QR {card.card_number} (ref {locked.reference_id})"
+            if existing_tx:
+                existing_tx.card = card
+                existing_tx.status = STATUS_SUCCESS
+                existing_tx.type = 'deducted'
+                existing_tx.amount = amount
+                existing_tx.balance_before = balance_before
+                existing_tx.balance_after = wallet.balance
+                existing_tx.remarks = remarks_str
+                existing_tx.save(update_fields=['card', 'status', 'type', 'amount', 'balance_before', 'balance_after', 'remarks', 'updated_at'])
+            else:
+                create_wallet_transaction(
+                    wallet=wallet,
+                    user=pt.user,
+                    card=card,
+                    amount=amount,
+                    type='deducted',
+                    remarks=remarks_str,
+                    status=STATUS_SUCCESS,
+                    balance_before=balance_before,
+                    balance_after=wallet.balance,
+                )
+
+        elif pt.purpose == PURPOSE_VEHICLE_TICKET_BOOKING:
+            deposit_before = wallet.balance
             wallet.balance += amount
             wallet.save(update_fields=['balance', 'updated_at'])
             create_wallet_transaction(
@@ -263,74 +408,54 @@ def _credit_paid_payment(pt, batch_id=''):
                 user=pt.user,
                 amount=amount,
                 type='add',
-                remarks='NepalPay QR payment',
-                status='success',
+                remarks=f"Wallet deposit via QR (ref {locked.reference_id})",
+                status=STATUS_SUCCESS,
+                balance_before=deposit_before,
+                balance_after=wallet.balance,
             )
-
-        if pt.purpose == PURPOSE_CARD_TOPUP and pt.card_id:
-            card = Card.objects.get(pk=pt.card_id)
-            if wallet.balance >= amount:
-                wallet.balance -= amount
-                wallet.save(update_fields=['balance', 'updated_at'])
-                create_wallet_transaction(
-                    wallet=wallet,
-                    user=pt.user,
-                    amount=amount,
-                    type='deducted',
-                    remarks=f'Card topup {card.card_number}',
-                    status='success',
-                )
-                card.balance += amount
-                card.save(update_fields=['balance', 'updated_at'])
-                from ..models import Transaction
-                Transaction.objects.create(
-                    wallet=wallet,
-                    user=pt.user,
-                    card=card,
-                    status='success',
-                    balance_before=wallet.balance,
-                    balance_after=wallet.balance,
-                    amount=amount,
-                    type='deducted',
-                    remarks=f'Card topup {card.card_number}',
-                )
-
-        if pt.purpose == PURPOSE_VEHICLE_TICKET_BOOKING and pt.vehicle_ticket_booking_id:
-            b = VehicleTicketBooking.objects.select_related('vehicle_schedule').get(pk=pt.vehicle_ticket_booking_id)
-            if not b.is_paid and wallet.balance >= amount:
-                seat_remarks = _format_seat_remarks(b.seat)
-                seat_suffix = f' | Seat(s): {seat_remarks}' if seat_remarks else ''
-                wallet.balance -= amount
-                wallet.save(update_fields=['balance', 'updated_at'])
-                create_wallet_transaction(
-                    wallet=wallet,
-                    user=pt.user,
-                    amount=amount,
-                    type='deducted',
-                    remarks=f'Ticket payment {b.pnr}{seat_suffix}',
-                    status='success',
-                )
-                b.is_paid = True
-                b.save(update_fields=['is_paid', 'updated_at'])
-                commission = Decimal('0')
-                if getattr(pt.user, 'is_ticket_dealer', False) and getattr(pt.user, 'ticket_commission', None):
-                    try:
-                        commission = amount * (pt.user.ticket_commission / Decimal('100'))
-                    except (TypeError, ValueError):
-                        pass
-                if commission > 0:
-                    wallet.balance += commission
+            if pt.vehicle_ticket_booking_id:
+                b = VehicleTicketBooking.objects.select_for_update().select_related('vehicle_schedule').get(pk=pt.vehicle_ticket_booking_id)
+                if not b.is_paid and wallet.balance >= amount:
+                    seat_remarks = _format_seat_remarks(b.seat)
+                    seat_suffix = f' | Seat(s): {seat_remarks}' if seat_remarks else ''
+                    pay_before = wallet.balance
+                    wallet.balance -= amount
                     wallet.save(update_fields=['balance', 'updated_at'])
                     create_wallet_transaction(
                         wallet=wallet,
                         user=pt.user,
-                        amount=commission,
-                        type='add',
-                        remarks=f'Commission for {b.pnr}{seat_suffix}',
-                        status='success',
+                        amount=amount,
+                        type='deducted',
+                        remarks=f'Ticket payment {b.pnr}{seat_suffix}',
+                        status=STATUS_SUCCESS,
+                        balance_before=pay_before,
+                        balance_after=wallet.balance,
                     )
+                    b.is_paid = True
+                    b.save(update_fields=['is_paid', 'updated_at'])
+                    commission = Decimal('0')
+                    if getattr(pt.user, 'is_ticket_dealer', False) and getattr(pt.user, 'ticket_commission', None):
+                        try:
+                            commission = amount * (pt.user.ticket_commission / Decimal('100'))
+                        except (TypeError, ValueError):
+                            pass
+                    if commission > 0:
+                        comm_before = wallet.balance
+                        wallet.balance += commission
+                        wallet.save(update_fields=['balance', 'updated_at'])
+                        create_wallet_transaction(
+                            wallet=wallet,
+                            user=pt.user,
+                            amount=commission,
+                            type='add',
+                            remarks=f'Commission for {b.pnr}{seat_suffix}',
+                            status=STATUS_SUCCESS,
+                            balance_before=comm_before,
+                            balance_after=wallet.balance,
+                        )
 
         return locked
+
 
 
 def _nchl_posting_response(code, message, errors=None, http_status=200):
